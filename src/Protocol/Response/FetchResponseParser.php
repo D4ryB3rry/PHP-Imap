@@ -114,7 +114,7 @@ class FetchResponseParser
         );
     }
 
-    public function parseBodyStructure(string $partNumber = '1'): BodyStructure
+    public function parseBodyStructure(string $partNumber = ''): BodyStructure
     {
         $this->expect('(');
         $this->skipWhitespace();
@@ -123,7 +123,7 @@ class FetchResponseParser
             return $this->parseMultipartStructure($partNumber);
         }
 
-        return $this->parseSinglePartStructure($partNumber);
+        return $this->parseSinglePartStructure($partNumber === '' ? '1' : $partNumber);
     }
 
     private function parseSinglePartStructure(string $partNumber): BodyStructure
