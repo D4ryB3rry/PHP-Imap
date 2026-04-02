@@ -1,18 +1,23 @@
-# PHP Imap Client
+# PHP IMAP Client
 
-A modern, zero-dependency PHP IMAP client built on raw sockets with full IMAPv4rev2 (RFC 9051) support.
+**Raw-socket IMAP client for PHP 8.4+ — zero dependencies, full IMAPv4rev2 support.**
 
-## Requirements
+No `imap_*` extension. No third-party packages. Just PHP, a socket, and the RFC.
 
-- PHP 8.4+
-- OpenSSL extension (for TLS connections)
-- mbstring extension (for charset conversion)
+- Raw socket connection with TLS/STARTTLS
+- Zero dependencies (only `ext-mbstring` + `ext-openssl`)
+- IMAPv4rev2 (RFC 9051) with 18+ extensions
+- Lazy loading — bodies & attachments fetched on demand
+- BODYSTRUCTURE-first — downloads only the MIME part you need
+- Fluent search builder, IDLE push, OAuth2 support
 
 ## Installation
 
 ```bash
-composer require D4ry\imap-client
+composer require d4ry/imap-client
 ```
+
+**Requirements:** PHP 8.4+, `ext-openssl`, `ext-mbstring`
 
 ## Quick Start
 
@@ -32,6 +37,23 @@ foreach ($mailbox->inbox()->messages() as $message) {
 
 $mailbox->disconnect();
 ```
+
+## Documentation
+
+- [Configuration](#configuration)
+- [Authentication](#authentication) (Plain, Login, OAuth2)
+- [Folders](#working-with-folders)
+- [Messages](#working-with-messages)
+- [Attachments](#working-with-attachments)
+- [Search](#search)
+- [IDLE (Push Notifications)](#idle-push-notifications)
+- [Appending Messages](#appending-messages)
+- [Namespace](#namespace)
+- [Raw Connection Access](#raw-connection-access)
+- [Error Handling](#error-handling)
+- [Supported Extensions](#supported-imapv4rev2-extensions)
+
+---
 
 ## Configuration
 
@@ -225,17 +247,6 @@ $message->copyTo('Backup');
 
 // Delete (sets \Deleted flag — call $folder->expunge() to permanently remove)
 $message->delete();
-```
-
-### IMAPv4rev2 Extensions
-
-```php
-// OBJECTID extension
-echo $message->emailId();   // unique across the server
-echo $message->threadId();  // conversation grouping
-
-// CONDSTORE extension
-echo $message->modSeq();    // modification sequence number
 ```
 
 ## Working with Attachments
@@ -523,14 +534,6 @@ D4ry\ImapClient\
 ├── Mailbox.php         # Entry point
 └── Message.php
 ```
-
-### Design Principles
-
-- **Zero dependencies** — only PHP core extensions (OpenSSL, mbstring)
-- **Lazy loading** — message bodies and attachments are fetched on demand, not in bulk
-- **BODYSTRUCTURE-first** — attachments are downloaded by MIME part number, not by fetching the entire message
-- **IMAPv4rev2 native** — CONDSTORE, QRESYNC, OBJECTID, MOVE, UTF8=ACCEPT, SPECIAL-USE, and more
-- **Raw socket** — no reliance on PHP's deprecated `imap_*` functions
 
 ## Supported IMAPv4rev2 Extensions
 
