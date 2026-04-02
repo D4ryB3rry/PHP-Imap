@@ -6,11 +6,13 @@ namespace D4ry\ImapClient\Collection;
 
 use D4ry\ImapClient\Contract\FolderInterface;
 use D4ry\ImapClient\Enum\SpecialUse;
+use D4ry\ImapClient\Exception\ReadOnlyCollectionException;
 
 /**
  * @implements \IteratorAggregate<int, FolderInterface>
+ * @implements \ArrayAccess<int, FolderInterface>
  */
-class FolderCollection implements \IteratorAggregate, \Countable
+class FolderCollection implements \IteratorAggregate, \Countable, \ArrayAccess
 {
     /** @var FolderInterface[]|null */
     private ?array $folders = null;
@@ -78,6 +80,29 @@ class FolderCollection implements \IteratorAggregate, \Countable
     {
         return array_find($this->load(), fn($folder) => (string)$folder->path() === $path);
 
+    }
+
+    /**
+     * @return FolderInterface[]
+     */
+    public function offsetExists(mixed $offset): bool
+    {
+        return isset($this->load()[$offset]);
+    }
+
+    public function offsetGet(mixed $offset): FolderInterface
+    {
+        return $this->load()[$offset];
+    }
+
+    public function offsetSet(mixed $offset, mixed $value): void
+    {
+        throw new ReadOnlyCollectionException();
+    }
+
+    public function offsetUnset(mixed $offset): void
+    {
+        throw new ReadOnlyCollectionException();
     }
 
     /**

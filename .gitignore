@@ -4,4 +4,6 @@ composer.lock
 
 # IDE
 /.idea/
+
+# Testing
 /.testing/

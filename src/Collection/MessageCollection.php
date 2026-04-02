@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace D4ry\ImapClient\Collection;
 
 use D4ry\ImapClient\Contract\MessageInterface;
+use D4ry\ImapClient\Exception\ReadOnlyCollectionException;
 
 /**
  * @implements \IteratorAggregate<int, MessageInterface>
+ * @implements \ArrayAccess<int, MessageInterface>
  */
-class MessageCollection implements \IteratorAggregate, \Countable
+class MessageCollection implements \IteratorAggregate, \Countable, \ArrayAccess
 {
     /** @var MessageInterface[]|null */
     private ?array $messages = null;
@@ -61,6 +63,29 @@ class MessageCollection implements \IteratorAggregate, \Countable
     public function isEmpty(): bool
     {
         return $this->load() === [];
+    }
+
+    /**
+     * @return MessageInterface[]
+     */
+    public function offsetExists(mixed $offset): bool
+    {
+        return isset($this->load()[$offset]);
+    }
+
+    public function offsetGet(mixed $offset): MessageInterface
+    {
+        return $this->load()[$offset];
+    }
+
+    public function offsetSet(mixed $offset, mixed $value): void
+    {
+        throw new ReadOnlyCollectionException();
+    }
+
+    public function offsetUnset(mixed $offset): void
+    {
+        throw new ReadOnlyCollectionException();
     }
 
     /**
