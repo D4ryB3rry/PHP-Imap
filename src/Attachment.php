@@ -76,10 +76,10 @@ class Attachment implements AttachmentInterface
         return $this->structure->id;
     }
 
-    public function save(string $directoryPath): void
+    public function save(string $directoryPath, ?string $filename = null): void
     {
         $directoryPath = rtrim($directoryPath, '/');
-        $filename = $this->filename();
+        $filename = basename($filename ?? $this->filename());
         $path = $directoryPath . '/' . $filename;
 
         if (!is_dir($directoryPath) && !mkdir($directoryPath, 0755, true) && !is_dir($directoryPath)) {

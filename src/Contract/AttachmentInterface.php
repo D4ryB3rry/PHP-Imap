@@ -18,5 +18,5 @@ interface AttachmentInterface
 
     public function contentId(): ?string;
 
-    public function save(string $directoryPath): void;
+    public function save(string $directoryPath, ?string $filename = null): void;
 }

@@ -44,7 +44,10 @@ readonly class Mailbox implements MailboxInterface
 
         // STARTTLS if needed
         if ($config->encryption === Encryption::StartTls) {
-            $transceiver->command('STARTTLS');
+            $response = $transceiver->command('STARTTLS');
+            if (!$response->isOk()) {
+                throw new ConnectionException('STARTTLS failed: ' . $response->text);
+            }
             $connection->enableTls();
             $transceiver->refreshCapabilities();
         }
