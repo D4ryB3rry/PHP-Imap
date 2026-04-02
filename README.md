@@ -1,14 +1,19 @@
 # PHP IMAP Client
 
+![PHP >= 8.4](https://img.shields.io/badge/PHP-%3E%3D%208.4-8892BF)
+![License Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue)
+![Packagist Version](https://img.shields.io/packagist/v/d4ry/imap-client)
+
 **Raw-socket IMAP client for PHP 8.4+ — zero dependencies, full IMAPv4rev2 support.**
 
-No `imap_*` extension. No third-party packages. Just PHP, a socket, and the RFC.
+PHP's `imap_*` extension wraps a C library from the 90s — no IMAPv4rev2, silent failures, no partial fetch.
+This library talks IMAP directly over sockets and gives you full control.
 
 - Raw socket connection with TLS/STARTTLS
 - Zero dependencies (only `ext-mbstring` + `ext-openssl`)
 - IMAPv4rev2 (RFC 9051) with 18+ extensions
 - Lazy loading — bodies & attachments fetched on demand
-- BODYSTRUCTURE-first — downloads only the MIME part you need
+- BODYSTRUCTURE-first — fetches only the MIME part you need (50 MB email, 12 KB text body? You download 12 KB)
 - Fluent search builder, IDLE push, OAuth2 support
 
 ## Installation
@@ -33,6 +38,10 @@ $mailbox = Mailbox::connect(new Config(
 
 foreach ($mailbox->inbox()->messages() as $message) {
     echo $message->envelope()->subject . "\n";
+
+    foreach ($message->attachments()->nonInline() as $attachment) {
+        $attachment->save('/tmp');
+    }
 }
 
 $mailbox->disconnect();
