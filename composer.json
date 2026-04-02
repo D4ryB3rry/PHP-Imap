@@ -1,18 +1,18 @@
 {
-    "name": "d4ry/imap-client",
-    "autoload": {
-        "psr-4": {
-            "D4ry\\ImapClient\\": "src/"
-        }
-    },
-    "authors": [
-        {
-            "name": "D4ryB3rry",
-            "email": "d4ryb3rry@gmail.com"
-        }
-    ],
-    "require-dev": {
-    },
+  "name": "d4ry/imap-client",
+  "license": "Apache-2.0",
+  "description": "Socketbased IMAP Client for PHP ",
+  "autoload": {
+    "psr-4": {
+      "D4ry\\ImapClient\\": "src/"
+    }
+  },
+  "authors": [
+    {
+      "name": "D4ryB3rry",
+      "email": "d4ryb3rry@gmail.com"
+    }
+  ],
   "require": {
     "ext-mbstring": "*"
   }
