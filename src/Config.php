@@ -19,6 +19,8 @@ readonly class Config
         public bool $enableQresync = false,
         public bool $utf8Accept = false,
         public ?array $clientId = null,
+        public array $sslOptions = [],
+        public ?string $logPath = null,
     ) {
     }
 

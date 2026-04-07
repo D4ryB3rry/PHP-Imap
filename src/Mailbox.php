@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace D4ry\ImapClient;
 
 use D4ry\ImapClient\Collection\FolderCollection;
+use D4ry\ImapClient\Connection\LoggingConnection;
 use D4ry\ImapClient\Connection\SocketConnection;
 use D4ry\ImapClient\Contract\FolderInterface;
 use D4ry\ImapClient\Contract\MailboxInterface;
@@ -36,7 +37,12 @@ readonly class Mailbox implements MailboxInterface
     public static function connect(Config $config): self
     {
         $connection = new SocketConnection();
-        $connection->open($config->host, $config->port, $config->encryption, $config->timeout);
+
+        if ($config->logPath !== null) {
+            $connection = new LoggingConnection($connection, $config->logPath);
+        }
+
+        $connection->open($config->host, $config->port, $config->encryption, $config->timeout, $config->sslOptions);
 
         $transceiver = new Transceiver($connection);
 

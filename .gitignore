@@ -7,3 +7,11 @@ composer.lock
 
 # Testing
 /.testing/
+/.phpunit.cache/
+.phpunit.result.cache
+/build/
+/tests/.env
+
+# Logs
+imap.log
+*.log

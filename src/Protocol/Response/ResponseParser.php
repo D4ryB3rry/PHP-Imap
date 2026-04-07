@@ -51,11 +51,11 @@ class ResponseParser
                 continue;
             }
 
-            if (str_starts_with($line, '+ ')) {
+            if ($line === '+' || str_starts_with($line, '+ ')) {
                 return new Response(
                     status: ResponseStatus::Ok,
                     tag: '+',
-                    text: trim(substr($line, 2)),
+                    text: $line === '+' ? '' : trim(substr($line, 2)),
                     untagged: $untagged,
                 );
             }
@@ -71,6 +71,10 @@ class ResponseParser
     public function readContinuation(): string
     {
         $line = $this->readFullLine();
+
+        if ($line === '+') {
+            return '';
+        }
 
         if (!str_starts_with($line, '+ ')) {
             throw new ProtocolException('Expected continuation, got: ' . $line);

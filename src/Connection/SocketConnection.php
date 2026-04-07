@@ -16,7 +16,7 @@ class SocketConnection implements ConnectionInterface
 
     private float $timeout = 30.0;
 
-    public function open(string $host, int $port, Encryption $encryption, float $timeout): void
+    public function open(string $host, int $port, Encryption $encryption, float $timeout, array $sslOptions = []): void
     {
         $this->timeout = $timeout;
 
@@ -25,12 +25,14 @@ class SocketConnection implements ConnectionInterface
             default => sprintf('tcp://%s:%d', $host, $port),
         };
 
+        $sslContext = array_replace([
+            'verify_peer' => true,
+            'verify_peer_name' => true,
+            'allow_self_signed' => false,
+        ], $sslOptions);
+
         $context = stream_context_create([
-            'ssl' => [
-                'verify_peer' => true,
-                'verify_peer_name' => true,
-                'allow_self_signed' => false,
-            ],
+            'ssl' => $sslContext,
         ]);
 
         $errno = 0;
@@ -116,9 +118,8 @@ class SocketConnection implements ConnectionInterface
         $result = @stream_socket_enable_crypto(
             $this->stream,
             true,
-            STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT | STREAM_CRYPTO_METHOD_TLSv1_3_CLIENT,
+            STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT | STREAM_CRYPTO_METHOD_TLSv1_3_CLIENT | STREAM_CRYPTO_METHOD_TLSv1_1_CLIENT,
         );
-
         if ($result !== true) {
             throw new ConnectionException('Failed to enable TLS on socket');
         }
