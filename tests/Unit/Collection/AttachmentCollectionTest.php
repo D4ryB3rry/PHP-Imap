@@ -53,11 +53,32 @@ final class AttachmentCollectionTest extends TestCase
         self::assertSame(0, $collection->count());
     }
 
+    public function testOffsetExistsAndGet(): void
+    {
+        $a = $this->makeAttachment(false);
+        $b = $this->makeAttachment(true);
+        $collection = new AttachmentCollection([$a, $b]);
+
+        self::assertTrue(isset($collection[0]));
+        self::assertTrue(isset($collection[1]));
+        self::assertFalse(isset($collection[2]));
+        self::assertSame($a, $collection[0]);
+        self::assertSame($b, $collection[1]);
+    }
+
     public function testOffsetSetThrows(): void
     {
         $collection = new AttachmentCollection();
 
         $this->expectException(ReadOnlyCollectionException::class);
         $collection[0] = $this->makeAttachment(false);
+    }
+
+    public function testOffsetUnsetThrows(): void
+    {
+        $collection = new AttachmentCollection([$this->makeAttachment(false)]);
+
+        $this->expectException(ReadOnlyCollectionException::class);
+        unset($collection[0]);
     }
 }

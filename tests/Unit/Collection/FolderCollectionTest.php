@@ -69,10 +69,31 @@ final class FolderCollectionTest extends TestCase
         self::assertSame($drafts, $collection->byPath('INBOX/Drafts'));
     }
 
+    public function testOffsetExistsAndGet(): void
+    {
+        $inbox = $this->folder('INBOX', 'INBOX');
+        $drafts = $this->folder('Drafts', 'INBOX/Drafts');
+        $collection = FolderCollection::fromArray([$inbox, $drafts]);
+
+        self::assertTrue(isset($collection[0]));
+        self::assertTrue(isset($collection[1]));
+        self::assertFalse(isset($collection[2]));
+        self::assertSame($inbox, $collection[0]);
+        self::assertSame($drafts, $collection[1]);
+    }
+
     public function testOffsetSetThrows(): void
     {
         $collection = FolderCollection::fromArray([]);
         $this->expectException(ReadOnlyCollectionException::class);
         $collection[0] = $this->folder('X', 'X');
+    }
+
+    public function testOffsetUnsetThrows(): void
+    {
+        $collection = FolderCollection::fromArray([$this->folder('INBOX', 'INBOX')]);
+
+        $this->expectException(ReadOnlyCollectionException::class);
+        unset($collection[0]);
     }
 }

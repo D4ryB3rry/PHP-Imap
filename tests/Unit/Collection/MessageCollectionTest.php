@@ -63,6 +63,19 @@ final class MessageCollectionTest extends TestCase
         self::assertSame($msgs, $iterated);
     }
 
+    public function testOffsetExistsAndGet(): void
+    {
+        $a = $this->createStub(MessageInterface::class);
+        $b = $this->createStub(MessageInterface::class);
+        $collection = MessageCollection::fromArray([$a, $b]);
+
+        self::assertTrue(isset($collection[0]));
+        self::assertTrue(isset($collection[1]));
+        self::assertFalse(isset($collection[2]));
+        self::assertSame($a, $collection[0]);
+        self::assertSame($b, $collection[1]);
+    }
+
     public function testOffsetSetThrows(): void
     {
         $collection = MessageCollection::fromArray([]);
