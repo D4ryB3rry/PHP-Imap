@@ -3,6 +3,7 @@
 ![PHP >= 8.4](https://img.shields.io/badge/PHP-%3E%3D%208.4-8892BF)
 ![License Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue)
 ![Packagist Version](https://img.shields.io/packagist/v/d4ry/imap-client)
+[![codecov](https://codecov.io/gh/D4ryB3rry/PHP-Imap/graph/badge.svg?token=07Z3M6IDRR)](https://codecov.io/gh/D4ryB3rry/PHP-Imap)
 
 **Raw-socket IMAP client for PHP 8.4+ — zero dependencies, full IMAPv4rev2 support.**
 

@@ -19,28 +19,4 @@ final class FastmailIntegrationTest extends AbstractProviderIntegrationTestCase
     {
         return 'imap.fastmail.com';
     }
-
-    public function testCanConnect(): void
-    {
-        $this->connect();
-        self::markTestIncomplete('Fastmail end-to-end coverage pending — strong CONDSTORE/QRESYNC support to verify.');
-    }
-
-    public function testListsFolders(): void
-    {
-        $this->connect();
-        self::markTestIncomplete('Fastmail folder listing pending.');
-    }
-
-    public function testFetchesLatestMessage(): void
-    {
-        $this->connect();
-        self::markTestIncomplete('Fastmail latest-message fetch pending.');
-    }
-
-    public function testSearchUnread(): void
-    {
-        $this->connect();
-        self::markTestIncomplete('Fastmail unread search pending.');
-    }
 }

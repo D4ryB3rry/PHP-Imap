@@ -19,28 +19,4 @@ final class YahooIntegrationTest extends AbstractProviderIntegrationTestCase
     {
         return 'imap.mail.yahoo.com';
     }
-
-    public function testCanConnect(): void
-    {
-        $this->connect();
-        self::markTestIncomplete('Yahoo end-to-end coverage pending — requires app password.');
-    }
-
-    public function testListsFolders(): void
-    {
-        $this->connect();
-        self::markTestIncomplete('Yahoo folder listing pending.');
-    }
-
-    public function testFetchesLatestMessage(): void
-    {
-        $this->connect();
-        self::markTestIncomplete('Yahoo latest-message fetch pending.');
-    }
-
-    public function testSearchUnread(): void
-    {
-        $this->connect();
-        self::markTestIncomplete('Yahoo unread search pending.');
-    }
 }

@@ -8,6 +8,11 @@ use D4ry\ImapClient\Auth\PlainCredential;
 use D4ry\ImapClient\Config;
 use D4ry\ImapClient\Enum\Encryption;
 use D4ry\ImapClient\Mailbox;
+use D4ry\ImapClient\Search\Search;
+use D4ry\ImapClient\Search\SearchResult;
+use D4ry\ImapClient\ValueObject\Envelope;
+use D4ry\ImapClient\ValueObject\Uid;
+use PHPUnit\Framework\Attributes\CoversNothing;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -35,6 +40,17 @@ abstract class AbstractProviderIntegrationTestCase extends TestCase
     abstract protected function defaultHost(): string;
 
     /**
+     * Override in subclasses that need stream-context SSL options
+     * (e.g. self-signed certificates from Proton Bridge).
+     *
+     * @return array<string, mixed>
+     */
+    protected function sslOptions(): array
+    {
+        return [];
+    }
+
+    /**
      * @return array{host:string,port:int,user:string,pass:string,encryption:Encryption}
      */
     final protected function loadConfig(): array
@@ -57,7 +73,7 @@ abstract class AbstractProviderIntegrationTestCase extends TestCase
             ));
         }
 
-        $port = (int) ($this->env($prefix . 'PORT') ?? '993');
+        $port = (int)($this->env($prefix . 'PORT') ?? '993');
         $encryptionRaw = $this->env($prefix . 'ENCRYPTION') ?? 'tls';
         $encryption = Encryption::tryFrom($encryptionRaw) ?? Encryption::Tls;
 
@@ -70,7 +86,10 @@ abstract class AbstractProviderIntegrationTestCase extends TestCase
         ];
     }
 
-    final protected function connect(): Mailbox
+    /**
+     * @param array<string, mixed>|null $sslOptions Defaults to {@see self::sslOptions()} when null.
+     */
+    final protected function connect(?array $sslOptions = null): Mailbox
     {
         $cfg = $this->loadConfig();
         $config = new Config(
@@ -78,15 +97,106 @@ abstract class AbstractProviderIntegrationTestCase extends TestCase
             credential: new PlainCredential($cfg['user'], $cfg['pass']),
             port: $cfg['port'],
             encryption: $cfg['encryption'],
+            sslOptions: $sslOptions ?? $this->sslOptions(),
         );
 
         return Mailbox::connect($config);
+    }
+
+    #[CoversNothing]
+    final public function testCanConnect(): void
+    {
+        $mailbox = $this->connect();
+
+        try {
+            $capabilities = $mailbox->capabilities();
+            self::assertNotEmpty(
+                $capabilities,
+                'Provider returned an empty CAPABILITY list — handshake or auth likely broken.',
+            );
+        } finally {
+            $mailbox->disconnect();
+        }
+    }
+
+    #[CoversNothing]
+    final public function testListsFolders(): void
+    {
+        $mailbox = $this->connect();
+
+        try {
+            $folders = $mailbox->folders()->toArray();
+
+            self::assertNotEmpty($folders, 'Provider returned no folders at all.');
+
+            $hasInbox = false;
+            foreach ($folders as $folder) {
+                if (strcasecmp($folder->path()->path, 'INBOX') === 0) {
+                    $hasInbox = true;
+                    break;
+                }
+            }
+
+            self::assertTrue($hasInbox, 'Provider folder list does not contain INBOX.');
+        } finally {
+            $mailbox->disconnect();
+        }
+    }
+
+    #[CoversNothing]
+    final public function testFetchesLatestMessage(): void
+    {
+        $mailbox = $this->connect();
+
+        try {
+            $inbox = $mailbox->inbox();
+            $inbox->examine();
+
+            if ($inbox->status()->messages === 0) {
+                self::markTestSkipped('INBOX is empty — cannot fetch a latest message.');
+            }
+
+            $result = $inbox->search(new Search()->all());
+            self::assertNotEmpty($result->uids, 'INBOX SEARCH ALL returned no UIDs despite non-zero MESSAGES count.');
+
+            $latestUid = $result->uids[array_key_last($result->uids)];
+            self::assertInstanceOf(Uid::class, $latestUid);
+            self::assertGreaterThan(0, $latestUid->value);
+
+            $message = $inbox->message($latestUid);
+
+            self::assertSame($latestUid->value, $message->uid()->value);
+            self::assertInstanceOf(Envelope::class, $message->envelope());
+        } finally {
+            $mailbox->disconnect();
+        }
+    }
+
+    #[CoversNothing]
+    final public function testSearchUnread(): void
+    {
+        $mailbox = $this->connect();
+
+        try {
+            $inbox = $mailbox->inbox();
+            $inbox->examine();
+
+            $result = $inbox->search(new Search()->unread());
+
+            self::assertInstanceOf(SearchResult::class, $result);
+            foreach ($result->uids as $uid) {
+                self::assertInstanceOf(Uid::class, $uid);
+                self::assertGreaterThan(0, $uid->value);
+            }
+        } finally {
+            $mailbox->disconnect();
+        }
     }
 
     private function env(string $name): ?string
     {
         $value = $_ENV[$name] ?? getenv($name);
 
-        return ($value === false || $value === '') ? null : (string) $value;
+        return ($value === false || $value === '') ? null : (string)$value;
     }
 }

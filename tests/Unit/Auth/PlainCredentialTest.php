@@ -5,10 +5,29 @@ declare(strict_types=1);
 namespace D4ry\ImapClient\Tests\Unit\Auth;
 
 use D4ry\ImapClient\Auth\PlainCredential;
+use D4ry\ImapClient\Enum\Capability;
+use D4ry\ImapClient\Exception\AuthenticationException;
+use D4ry\ImapClient\Exception\CommandException;
+use D4ry\ImapClient\Protocol\Command\Command;
+use D4ry\ImapClient\Protocol\Response\Response;
+use D4ry\ImapClient\Protocol\Response\ResponseParser;
+use D4ry\ImapClient\Protocol\TagGenerator;
+use D4ry\ImapClient\Protocol\Transceiver;
+use D4ry\ImapClient\Tests\Unit\Support\FakeConnection;
+use D4ry\ImapClient\ValueObject\Tag;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\UsesClass;
 use PHPUnit\Framework\TestCase;
+use ReflectionClass;
 
 #[CoversClass(PlainCredential::class)]
+#[UsesClass(Transceiver::class)]
+#[UsesClass(Command::class)]
+#[UsesClass(Response::class)]
+#[UsesClass(ResponseParser::class)]
+#[UsesClass(TagGenerator::class)]
+#[UsesClass(Tag::class)]
+#[UsesClass(CommandException::class)]
 final class PlainCredentialTest extends TestCase
 {
     public function testMechanism(): void
@@ -24,12 +43,64 @@ final class PlainCredentialTest extends TestCase
         self::assertSame('s3cret', $credential->password);
     }
 
-    public function testAuthenticateAgainstFakeTransceiver(): void
+    public function testAuthenticateUsesSaslIrWhenCapabilityPresent(): void
     {
-        self::markTestIncomplete(
-            'PlainCredential::authenticate() is tightly coupled to the concrete Transceiver class. '
-            . 'A FakeTransceiver harness is needed to verify the SASL PLAIN payload (base64 of "\0user\0pass") '
-            . 'is sent through both the SASL-IR and continuation flows.'
+        $connection = new FakeConnection();
+        $transceiver = new Transceiver($connection);
+        $this->seedCapabilities($transceiver, [Capability::SaslIr]);
+
+        $connection->queueLines('A0001 OK Authenticated');
+
+        (new PlainCredential('user', 'pass'))->authenticate($transceiver);
+
+        $expectedPayload = base64_encode("\x00user\x00pass");
+        self::assertSame(
+            ['A0001 AUTHENTICATE PLAIN ' . $expectedPayload . "\r\n"],
+            $connection->writes,
         );
+    }
+
+    public function testAuthenticateFallsBackToContinuationFlow(): void
+    {
+        $connection = new FakeConnection();
+        $transceiver = new Transceiver($connection);
+        $this->seedCapabilities($transceiver, [Capability::Imap4rev1]);
+
+        $connection->queueLines('+ Ready', 'A0001 OK Authenticated');
+
+        (new PlainCredential('user', 'pass'))->authenticate($transceiver);
+
+        $expectedPayload = base64_encode("\x00user\x00pass");
+        self::assertSame(
+            [
+                "A0001 AUTHENTICATE PLAIN\r\n",
+                $expectedPayload . "\r\n",
+            ],
+            $connection->writes,
+        );
+    }
+
+    public function testAuthenticateThrowsOnFailure(): void
+    {
+        $connection = new FakeConnection();
+        $transceiver = new Transceiver($connection);
+        $this->seedCapabilities($transceiver, [Capability::SaslIr]);
+
+        $connection->queueLines('A0001 NO Bad credentials');
+
+        $this->expectException(AuthenticationException::class);
+        $this->expectExceptionMessage('PLAIN authentication failed');
+
+        (new PlainCredential('user', 'pass'))->authenticate($transceiver);
+    }
+
+    /**
+     * @param Capability[] $capabilities
+     */
+    private function seedCapabilities(Transceiver $transceiver, array $capabilities): void
+    {
+        $reflection = new ReflectionClass(Transceiver::class);
+        $property = $reflection->getProperty('cachedCapabilities');
+        $property->setValue($transceiver, $capabilities);
     }
 }

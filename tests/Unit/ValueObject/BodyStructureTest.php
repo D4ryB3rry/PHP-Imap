@@ -74,4 +74,79 @@ final class BodyStructureTest extends TestCase
 
         self::assertSame(ContentTransferEncoding::Base64, $bs->encoding);
     }
+
+    public function testIsAttachmentWithExplicitDisposition(): void
+    {
+        $bs = new BodyStructure(
+            type: 'APPLICATION',
+            subtype: 'OCTET-STREAM',
+            disposition: 'ATTACHMENT',
+        );
+
+        self::assertTrue($bs->isAttachment());
+    }
+
+    public function testInlineWithNameIsNotAttachment(): void
+    {
+        $bs = new BodyStructure(
+            type: 'IMAGE',
+            subtype: 'PNG',
+            parameters: ['name' => 'pic.png'],
+            disposition: 'inline',
+        );
+
+        self::assertFalse($bs->isAttachment());
+        self::assertSame('pic.png', $bs->filename());
+    }
+
+    public function testInlineWithoutContentIdIsNotInline(): void
+    {
+        $bs = new BodyStructure(
+            type: 'IMAGE',
+            subtype: 'PNG',
+            disposition: 'inline',
+        );
+
+        self::assertFalse($bs->isInline());
+    }
+
+    public function testFilenameReturnsNullWhenAbsent(): void
+    {
+        $bs = new BodyStructure('TEXT', 'PLAIN');
+
+        self::assertNull($bs->filename());
+        self::assertFalse($bs->isAttachment());
+    }
+
+    public function testCharsetReturnsNullWhenAbsent(): void
+    {
+        self::assertNull(new BodyStructure('TEXT', 'PLAIN')->charset());
+    }
+
+    public function testDefaultPartNumberAndEmptyParts(): void
+    {
+        $bs = new BodyStructure('TEXT', 'PLAIN');
+
+        self::assertSame('1', $bs->partNumber);
+        self::assertSame([], $bs->parts);
+        self::assertSame(0, $bs->size);
+        self::assertNull($bs->encoding);
+    }
+
+    public function testMultipartWithChildParts(): void
+    {
+        $child1 = new BodyStructure('TEXT', 'PLAIN', partNumber: '1');
+        $child2 = new BodyStructure('TEXT', 'HTML', partNumber: '2');
+        $bs = new BodyStructure(
+            type: 'multipart',
+            subtype: 'alternative',
+            parts: [$child1, $child2],
+        );
+
+        self::assertTrue($bs->isMultipart());
+        self::assertSame('multipart/alternative', $bs->mimeType());
+        self::assertCount(2, $bs->parts);
+        self::assertSame($child1, $bs->parts[0]);
+        self::assertSame('2', $bs->parts[1]->partNumber);
+    }
 }

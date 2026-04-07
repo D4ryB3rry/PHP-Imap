@@ -189,8 +189,8 @@ class ResponseParser
             'LIST', 'LSUB' => $this->parseListResponse($data),
             'STATUS' => $this->parseStatusResponse($data),
             'SEARCH', 'SORT' => $this->parseNumberList($data),
-            'NAMESPACE' => $data,
-            'ID' => $data,
+//            'NAMESPACE' => $data,
+//            'ID' => $data,
             'ENABLED' => preg_split('/\s+/', trim($data)),
             default => $data,
         };
