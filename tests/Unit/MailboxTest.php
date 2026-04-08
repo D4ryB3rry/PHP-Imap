@@ -619,9 +619,16 @@ final class MailboxTest extends TestCase
             $writeLine($peer, '* CAPABILITY IMAP4rev1');
             $writeLine($peer, 'A0002 OK CAPABILITY done');
 
-            // 4) LOGIN.
+            // 4) LOGIN — bare OK with no CAPABILITY response code, so the
+            //    handshake must follow up with a refresh.
             $readLine($peer); // A0003 LOGIN ...
             $writeLine($peer, 'A0003 OK LOGIN done');
+
+            // 5) Post-auth refreshCapabilities() per RFC 3501 §6.2 — the
+            //    server's advertised capabilities can change across LOGIN.
+            $readLine($peer); // A0004 CAPABILITY
+            $writeLine($peer, '* CAPABILITY IMAP4rev1');
+            $writeLine($peer, 'A0004 OK CAPABILITY done');
 
             usleep(100_000);
         });
@@ -642,6 +649,131 @@ final class MailboxTest extends TestCase
 
             $mailbox = Mailbox::connect($config);
 
+            self::assertInstanceOf(Mailbox::class, $mailbox);
+        } finally {
+            $server->reap($pid);
+            $server->stop();
+        }
+    }
+
+    public function testHandshakeRefreshesCapabilitiesPostAuthWhenLoginOmitsCapabilityCode(): void
+    {
+        if (!function_exists('pcntl_fork')) {
+            self::markTestSkipped('pcntl extension required');
+        }
+
+        $server = new LoopbackServer();
+        $server->start('plain');
+
+        $pid = $server->forkAccept(function ($peer): void {
+            $readLine = static function ($peer): string {
+                $line = '';
+                while (($c = fread($peer, 1)) !== false && $c !== '') {
+                    $line .= $c;
+                    if (str_ends_with($line, "\r\n")) {
+                        return $line;
+                    }
+                }
+                return $line;
+            };
+            $writeLine = static function ($peer, string $line): void {
+                fwrite($peer, $line . "\r\n");
+                fflush($peer);
+            };
+
+            // 1) Greeting carries pre-auth CAPABILITY *including* OBJECTID.
+            //    Some servers advertise extensions pre-auth that they no
+            //    longer support after LOGIN — this is the exact stale-cache
+            //    scenario that produced "BAD Unknown parameter: EMAILID".
+            $writeLine($peer, '* OK [CAPABILITY IMAP4rev1 OBJECTID] ready');
+
+            // 2) LOGIN — bare OK, no [CAPABILITY ...] code on the reply.
+            $readLine($peer); // A0001 LOGIN ...
+            $writeLine($peer, 'A0001 OK LOGIN done');
+
+            // 3) Post-auth refresh: server now reports a capability set
+            //    *without* OBJECTID. The client must trust this and stop
+            //    asking for EMAILID/THREADID.
+            $readLine($peer); // A0002 CAPABILITY
+            $writeLine($peer, '* CAPABILITY IMAP4rev1 IDLE');
+            $writeLine($peer, 'A0002 OK CAPABILITY done');
+
+            usleep(100_000);
+        });
+
+        try {
+            $config = new Config(
+                host: $server->host(),
+                credential: new LoginCredential('user', 'pass'),
+                port: $server->port(),
+                encryption: Encryption::None,
+                timeout: 2.0,
+            );
+
+            $mailbox = Mailbox::connect($config);
+
+            $transceiverProp = (new ReflectionClass(Mailbox::class))->getProperty('transceiver');
+            $transceiver = $transceiverProp->getValue($mailbox);
+            self::assertInstanceOf(Transceiver::class, $transceiver);
+            self::assertFalse(
+                $transceiver->hasCapability(Capability::ObjectId),
+                'Stale pre-auth OBJECTID must be evicted by post-auth CAPABILITY refresh',
+            );
+        } finally {
+            $server->reap($pid);
+            $server->stop();
+        }
+    }
+
+    public function testHandshakeSkipsExtraCapabilityRoundTripWhenLoginOkCarriesCapabilityCode(): void
+    {
+        if (!function_exists('pcntl_fork')) {
+            self::markTestSkipped('pcntl extension required');
+        }
+
+        $server = new LoopbackServer();
+        $server->start('plain');
+
+        $pid = $server->forkAccept(function ($peer): void {
+            $readLine = static function ($peer): string {
+                $line = '';
+                while (($c = fread($peer, 1)) !== false && $c !== '') {
+                    $line .= $c;
+                    if (str_ends_with($line, "\r\n")) {
+                        return $line;
+                    }
+                }
+                return $line;
+            };
+            $writeLine = static function ($peer, string $line): void {
+                fwrite($peer, $line . "\r\n");
+                fflush($peer);
+            };
+
+            // 1) Greeting (no capabilities).
+            $writeLine($peer, '* OK ready');
+
+            // 2) LOGIN — OK reply piggy-backs the capability list. The
+            //    handshake must NOT issue a follow-up CAPABILITY command.
+            $readLine($peer); // A0001 LOGIN ...
+            $writeLine($peer, 'A0001 OK [CAPABILITY IMAP4rev1] LOGIN done');
+
+            // If the client incorrectly sends another command, it'll appear
+            // here. We deliberately do NOT respond — so the test would hang
+            // (and fail via timeout) if the regression returns.
+            usleep(100_000);
+        });
+
+        try {
+            $config = new Config(
+                host: $server->host(),
+                credential: new LoginCredential('user', 'pass'),
+                port: $server->port(),
+                encryption: Encryption::None,
+                timeout: 2.0,
+            );
+
+            $mailbox = Mailbox::connect($config);
             self::assertInstanceOf(Mailbox::class, $mailbox);
         } finally {
             $server->reap($pid);

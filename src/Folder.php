@@ -304,22 +304,52 @@ class Folder implements FolderInterface
 
         $uidList = implode(',', array_map(fn(Uid $u) => $u->value, $uids));
 
-        $fetchItems = ['UID', 'FLAGS', 'ENVELOPE', 'INTERNALDATE', 'RFC822.SIZE'];
+        $baseItems = ['UID', 'FLAGS', 'ENVELOPE', 'INTERNALDATE', 'RFC822.SIZE'];
 
         if ($this->transceiver->hasCapability(\D4ry\ImapClient\Enum\Capability::Condstore)) {
-            $fetchItems[] = 'MODSEQ';
+            $baseItems[] = 'MODSEQ';
         }
 
-        if ($this->transceiver->hasCapability(\D4ry\ImapClient\Enum\Capability::ObjectId)) {
+        $wantObjectId = $this->transceiver->hasCapability(\D4ry\ImapClient\Enum\Capability::ObjectId)
+            && !$this->transceiver->objectIdFetchItemsDisabled;
+
+        $fetchItems = $baseItems;
+        if ($wantObjectId) {
             $fetchItems[] = 'EMAILID';
             $fetchItems[] = 'THREADID';
         }
 
-        $response = $this->transceiver->command(
-            'UID FETCH',
-            $uidList,
-            '(' . implode(' ', $fetchItems) . ')',
-        );
+        try {
+            $response = $this->transceiver->command(
+                'UID FETCH',
+                $uidList,
+                '(' . implode(' ', $fetchItems) . ')',
+            );
+        } catch (\D4ry\ImapClient\Exception\CommandException $e) {
+            // Some servers (notably certain Dovecot builds) advertise the
+            // OBJECTID capability but reject EMAILID/THREADID in UID FETCH
+            // with a BAD response. Detect that exact failure mode, suppress
+            // those items for the remainder of this connection, and retry
+            // once. Anything else re-throws.
+            $isObjectIdReject = $wantObjectId
+                && $e->status === 'BAD'
+                && (
+                    stripos($e->responseText, 'EMAILID') !== false
+                    || stripos($e->responseText, 'THREADID') !== false
+                );
+
+            if (!$isObjectIdReject) {
+                throw $e;
+            }
+
+            $this->transceiver->objectIdFetchItemsDisabled = true;
+
+            $response = $this->transceiver->command(
+                'UID FETCH',
+                $uidList,
+                '(' . implode(' ', $baseItems) . ')',
+            );
+        }
 
         $messages = [];
 

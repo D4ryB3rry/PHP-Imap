@@ -23,6 +23,15 @@ class Transceiver implements TransceiverInterface
     /** @var Capability[] */
     private array $cachedCapabilities = [];
 
+    private int $capabilitiesGeneration = 0;
+
+    /**
+     * Set when the server advertises OBJECTID but rejects EMAILID/THREADID in
+     * UID FETCH (a real Dovecot quirk). Once tripped, FETCH item builders
+     * must omit those items for the rest of this connection.
+     */
+    public bool $objectIdFetchItemsDisabled = false;
+
     public ?string $selectedMailbox = null {
         get {
             return $this->selectedMailbox;
@@ -153,6 +162,11 @@ class Transceiver implements TransceiverInterface
         $this->capabilities();
     }
 
+    public function capabilitiesGeneration(): int
+    {
+        return $this->capabilitiesGeneration;
+    }
+
     public function getConnection(): ConnectionInterface
     {
         return $this->connection;
@@ -168,6 +182,7 @@ class Transceiver implements TransceiverInterface
         foreach ($response->untagged as $untagged) {
             if ($untagged->type === 'CAPABILITY' && is_array($untagged->data)) {
                 $this->cachedCapabilities = $this->parseCapabilityStrings($untagged->data);
+                $this->capabilitiesGeneration++;
             }
 
             if ($untagged->type === 'OK' && is_array($untagged->data)) {
@@ -177,6 +192,7 @@ class Transceiver implements TransceiverInterface
                     $this->cachedCapabilities = $this->parseCapabilityStrings(
                         preg_split('/\s+/', trim($capStr))
                     );
+                    $this->capabilitiesGeneration++;
                 }
             }
 
@@ -195,6 +211,7 @@ class Transceiver implements TransceiverInterface
             $this->cachedCapabilities = $this->parseCapabilityStrings(
                 preg_split('/\s+/', trim($capStr))
             );
+            $this->capabilitiesGeneration++;
         }
     }
 

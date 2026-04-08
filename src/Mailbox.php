@@ -109,8 +109,16 @@ readonly class Mailbox implements MailboxInterface
             $transceiver->refreshCapabilities();
         }
 
-        // Authenticate
+        // Authenticate. Per RFC 3501 §6.2, the capability list can change
+        // across authentication, so we must re-issue CAPABILITY unless the
+        // server already volunteered an updated set via a [CAPABILITY ...]
+        // response code on the LOGIN/AUTHENTICATE OK reply. We detect that by
+        // watching the Transceiver's capability generation counter.
+        $capsGenerationBefore = $transceiver->capabilitiesGeneration();
         $config->credential->authenticate($transceiver);
+        if ($transceiver->capabilitiesGeneration() === $capsGenerationBefore) {
+            $transceiver->refreshCapabilities();
+        }
 
         // Enable extensions after authentication
         $enableExtensions = [];

@@ -126,7 +126,7 @@ class SocketConnection implements ConnectionInterface
         $result = @stream_socket_enable_crypto(
             $this->stream,
             true,
-            STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT | STREAM_CRYPTO_METHOD_TLSv1_3_CLIENT | STREAM_CRYPTO_METHOD_TLSv1_1_CLIENT,
+            STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT | STREAM_CRYPTO_METHOD_TLSv1_3_CLIENT
         );
         if ($result !== true) {
             throw new ConnectionException('Failed to enable TLS on socket');

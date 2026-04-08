@@ -54,6 +54,7 @@ use ReflectionProperty;
 #[UsesClass(\D4ry\ImapClient\Support\ImapDateFormatter::class)]
 #[UsesClass(\D4ry\ImapClient\Exception\ParseException::class)]
 #[UsesClass(\D4ry\ImapClient\Exception\ImapException::class)]
+#[UsesClass(\D4ry\ImapClient\Exception\CommandException::class)]
 final class FolderTest extends TestCase
 {
     private function setCapabilities(Transceiver $transceiver, Capability ...$caps): void
@@ -587,5 +588,68 @@ final class FolderTest extends TestCase
         self::assertStringContainsString('MODSEQ', $connection->writes[2]);
         self::assertStringContainsString('EMAILID', $connection->writes[2]);
         self::assertStringContainsString('THREADID', $connection->writes[2]);
+    }
+
+    public function testFetchMessagesFallsBackWhenServerRejectsObjectIdItems(): void
+    {
+        // Reproduces a Dovecot quirk: server advertises OBJECTID in CAPABILITY
+        // but rejects EMAILID/THREADID inside UID FETCH with a BAD response.
+        // The Folder must catch that, suppress the items for the rest of the
+        // connection, and retry once.
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            'A0001 OK SELECT done',
+            '* SEARCH 7',
+            'A0002 OK SEARCH done',
+            // First UID FETCH attempt: server rejects EMAILID.
+            'A0003 BAD Error in IMAP command UID FETCH: Unknown parameter: EMAILID',
+            // Retry without EMAILID/THREADID: server accepts.
+            '* 1 FETCH (UID 7 FLAGS () INTERNALDATE "01-Jan-2024 12:00:00 +0000" RFC822.SIZE 1 ENVELOPE (NIL NIL NIL NIL NIL NIL NIL NIL NIL NIL))',
+            'A0004 OK FETCH done',
+        );
+
+        [$folder, $transceiver] = $this->makeFolder(
+            $connection,
+            'INBOX',
+            null,
+            [Capability::ObjectId],
+        );
+
+        $messages = $folder->messages();
+        self::assertSame(1, $messages->count());
+        self::assertSame(7, $messages[0]->uid()->value);
+
+        // First attempt did include the OBJECTID items.
+        self::assertStringContainsString('EMAILID', $connection->writes[2]);
+        self::assertStringContainsString('THREADID', $connection->writes[2]);
+
+        // Retry stripped them.
+        self::assertStringNotContainsString('EMAILID', $connection->writes[3]);
+        self::assertStringNotContainsString('THREADID', $connection->writes[3]);
+        self::assertStringContainsString('UID FETCH 7', $connection->writes[3]);
+
+        // Suppression flag is now set on the transceiver.
+        self::assertTrue($transceiver->objectIdFetchItemsDisabled);
+    }
+
+    public function testFetchMessagesRethrowsUnrelatedBadResponses(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            'A0001 OK SELECT done',
+            '* SEARCH 7',
+            'A0002 OK SEARCH done',
+            'A0003 BAD Mailbox is in inconsistent state',
+        );
+
+        [$folder] = $this->makeFolder(
+            $connection,
+            'INBOX',
+            null,
+            [Capability::ObjectId],
+        );
+
+        $this->expectException(\D4ry\ImapClient\Exception\CommandException::class);
+        $folder->messages()->count();
     }
 }
