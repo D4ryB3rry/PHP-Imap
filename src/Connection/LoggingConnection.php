@@ -61,6 +61,12 @@ class LoggingConnection implements ConnectionInterface
         }
     }
 
+    public function setReadTimeout(float $timeout): void
+    {
+        $this->log('TMO', sprintf('readTimeout=%.1f', $timeout));
+        $this->inner->setReadTimeout($timeout);
+    }
+
     public function readLine(): string
     {
         try {

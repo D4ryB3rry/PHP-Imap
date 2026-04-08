@@ -28,6 +28,11 @@ final class TimeoutOnceConnection implements ConnectionInterface
         $this->inner->open($host, $port, $encryption, $timeout, $sslOptions);
     }
 
+    public function setReadTimeout(float $timeout): void
+    {
+        $this->inner->setReadTimeout($timeout);
+    }
+
     public function readLine(): string
     {
         $this->callIndex++;

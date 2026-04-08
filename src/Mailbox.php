@@ -79,7 +79,26 @@ readonly class Mailbox implements MailboxInterface
     {
         $transceiver = new Transceiver($connection);
 
-        $greeting = $transceiver->readGreeting();
+        // Read the greeting with a deliberately tight timeout. If the server
+        // doesn't speak in time it's almost always an encryption mismatch
+        // (e.g. StartTls against an implicit-TLS port — the server is waiting
+        // for a TLS ClientHello and will never send the plaintext "* OK"),
+        // so failing fast with a diagnostic is much friendlier than blocking
+        // for the full $config->timeout window.
+        $greetingTimeout = min($config->greetingTimeout, $config->timeout);
+        $connection->setReadTimeout($greetingTimeout);
+
+        try {
+            $greeting = $transceiver->readGreeting();
+        } catch (\D4ry\ImapClient\Exception\TimeoutException $e) {
+            $connection->close();
+            throw new \D4ry\ImapClient\Exception\ConnectionException(
+                self::buildGreetingTimeoutHint($config, $greetingTimeout),
+                previous: $e,
+            );
+        }
+
+        $connection->setReadTimeout($config->timeout);
 
         // STARTTLS if needed
         if ($config->encryption === Encryption::StartTls) {
@@ -123,6 +142,34 @@ readonly class Mailbox implements MailboxInterface
         }
 
         return new self($transceiver);
+    }
+
+    /**
+     * Build the human-readable hint shown when the server doesn't deliver an
+     * IMAP greeting in time. The hint suggests which Encryption mode is most
+     * likely to work, based on what the user just tried.
+     */
+    private static function buildGreetingTimeoutHint(Config $config, float $waited): string
+    {
+        $base = sprintf(
+            'No IMAP greeting from %s:%d within %.1fs (encryption=%s).',
+            $config->host,
+            $config->port,
+            $waited,
+            $config->encryption->name,
+        );
+
+        $suggestion = match ($config->encryption) {
+            Encryption::StartTls, Encryption::None =>
+                ' The server accepted the TCP connection but never sent a plaintext "* OK ..." line.'
+                . ' This usually means the port is implicit-TLS — try Encryption::Tls.',
+            Encryption::Tls =>
+                ' The TLS handshake completed but the server never sent an IMAP greeting.'
+                . ' The port may not be implicit-TLS — try Encryption::StartTls or Encryption::None,'
+                . ' or check that the port actually speaks IMAP.',
+        };
+
+        return $base . $suggestion;
     }
 
     public function folders(): FolderCollection

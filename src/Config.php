@@ -15,6 +15,7 @@ readonly class Config
         public int $port = 993,
         public Encryption $encryption = Encryption::Tls,
         public float $timeout = 30.0,
+        public float $greetingTimeout = 10.0,
         public bool $enableCondstore = false,
         public bool $enableQresync = false,
         public bool $utf8Accept = false,

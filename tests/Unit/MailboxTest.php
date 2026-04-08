@@ -649,6 +649,102 @@ final class MailboxTest extends TestCase
         }
     }
 
+    public function testConnectFailsFastWithEncryptionHintWhenPlainServerNeverSendsGreeting(): void
+    {
+        if (!function_exists('pcntl_fork')) {
+            self::markTestSkipped('pcntl extension required');
+        }
+
+        // Plain TCP listener — accepts the connection but the handler just
+        // sleeps without writing a greeting, so readGreeting() must hit the
+        // greetingTimeout and the catch branch in performHandshake().
+        $server = new LoopbackServer();
+        $server->start('plain');
+
+        $pid = $server->forkAccept(function ($peer): void {
+            // Don't write anything. Hold the socket open long enough for the
+            // client's short greetingTimeout to fire while we're still here.
+            usleep(500_000);
+        });
+
+        try {
+            $config = new Config(
+                host: $server->host(),
+                credential: new LoginCredential('user', 'pass'),
+                port: $server->port(),
+                encryption: Encryption::StartTls,
+                timeout: 5.0,
+                greetingTimeout: 0.3,
+            );
+
+            try {
+                Mailbox::connect($config);
+                self::fail('Expected ConnectionException');
+            } catch (ConnectionException $e) {
+                self::assertStringContainsString('No IMAP greeting from', $e->getMessage());
+                self::assertStringContainsString('encryption=StartTls', $e->getMessage());
+                self::assertStringContainsString('try Encryption::Tls', $e->getMessage());
+                self::assertInstanceOf(
+                    \D4ry\ImapClient\Exception\TimeoutException::class,
+                    $e->getPrevious(),
+                );
+            }
+        } finally {
+            $server->reap($pid);
+            $server->stop();
+        }
+    }
+
+    public function testConnectFailsFastWithEncryptionHintWhenTlsServerNeverSendsGreeting(): void
+    {
+        if (!function_exists('pcntl_fork')) {
+            self::markTestSkipped('pcntl extension required');
+        }
+
+        // Implicit-TLS listener — exercises the Encryption::Tls arm of the
+        // hint builder. PHP's stream layer drives the TLS handshake during
+        // accept(), then the handler holds the socket open without sending
+        // an IMAP greeting, so the client times out post-handshake.
+        $server = new LoopbackServer();
+        $server->start('tls');
+
+        $pid = $server->forkAccept(function ($peer): void {
+            usleep(500_000);
+        });
+
+        try {
+            $config = new Config(
+                host: $server->host(),
+                credential: new LoginCredential('user', 'pass'),
+                port: $server->port(),
+                encryption: Encryption::Tls,
+                timeout: 5.0,
+                greetingTimeout: 0.3,
+                sslOptions: [
+                    'verify_peer' => false,
+                    'verify_peer_name' => false,
+                    'allow_self_signed' => true,
+                ],
+            );
+
+            try {
+                Mailbox::connect($config);
+                self::fail('Expected ConnectionException');
+            } catch (ConnectionException $e) {
+                self::assertStringContainsString('No IMAP greeting from', $e->getMessage());
+                self::assertStringContainsString('encryption=Tls', $e->getMessage());
+                self::assertStringContainsString('try Encryption::StartTls', $e->getMessage());
+                self::assertInstanceOf(
+                    \D4ry\ImapClient\Exception\TimeoutException::class,
+                    $e->getPrevious(),
+                );
+            }
+        } finally {
+            $server->reap($pid);
+            $server->stop();
+        }
+    }
+
     public function testConnectFromRecordingReplaysCapturedSession(): void
     {
         if (!function_exists('pcntl_fork')) {

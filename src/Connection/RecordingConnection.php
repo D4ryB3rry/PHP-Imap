@@ -79,6 +79,11 @@ class RecordingConnection implements ConnectionInterface
         }
     }
 
+    public function setReadTimeout(float $timeout): void
+    {
+        $this->inner->setReadTimeout($timeout);
+    }
+
     public function readLine(): string
     {
         try {

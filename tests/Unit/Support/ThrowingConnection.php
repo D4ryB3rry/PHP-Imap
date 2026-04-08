@@ -25,6 +25,11 @@ final class ThrowingConnection implements ConnectionInterface
         throw $this->error;
     }
 
+    public function setReadTimeout(float $timeout): void
+    {
+        // No-op: timeout adjustments aren't part of the error surface under test.
+    }
+
     public function readLine(): string
     {
         throw $this->error;

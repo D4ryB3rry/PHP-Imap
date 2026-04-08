@@ -51,6 +51,10 @@ final class FakeConnection implements ConnectionInterface
         $this->connected = true;
     }
 
+    public function setReadTimeout(float $timeout): void
+    {
+    }
+
     public function readLine(): string
     {
         if ($this->readQueue === []) {

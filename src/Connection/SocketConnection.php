@@ -58,6 +58,14 @@ class SocketConnection implements ConnectionInterface
         $this->stream = $stream;
     }
 
+    public function setReadTimeout(float $timeout): void
+    {
+        $this->assertConnected();
+
+        $this->timeout = $timeout;
+        stream_set_timeout($this->stream, (int) $timeout, (int) (($timeout - (int) $timeout) * 1_000_000));
+    }
+
     public function readLine(): string
     {
         $this->assertConnected();

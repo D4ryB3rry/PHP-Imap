@@ -91,6 +91,11 @@ class ReplayConnection implements ConnectionInterface
         $this->connected = true;
     }
 
+    public function setReadTimeout(float $timeout): void
+    {
+        // Replay is deterministic and offline — timeouts have no meaning here.
+    }
+
     public function readLine(): string
     {
         $event = $this->peek();
