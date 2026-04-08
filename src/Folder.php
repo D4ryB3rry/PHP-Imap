@@ -106,22 +106,35 @@ class Folder implements FolderInterface
 
     public function messages(Flag|SearchCriteriaInterface|null $criteria = null): MessageCollection
     {
-        return new MessageCollection(function () use ($criteria): array {
+        return new MessageCollection(function () use ($criteria): \Generator {
             $this->select();
 
-            $searchCriteria = match (true) {
-                $criteria === null => 'ALL',
-                $criteria instanceof Flag => $this->flagToSearchCriteria($criteria),
-                $criteria instanceof SearchCriteriaInterface => $criteria->compile(),
-            };
+            // Fast path: no criteria → skip the UID SEARCH ALL roundtrip
+            // entirely and FETCH the whole mailbox by sequence range. For
+            // mailboxes with tens of thousands of messages this saves both
+            // a full server-side search and parsing ~10k UIDs we'd just
+            // re-send straight back to the server.
+            if ($criteria === null) {
+                return yield from $this->streamFetchMessages('1:*', useUid: false);
+            }
+
+            $searchCriteria = $criteria instanceof Flag
+                ? $this->flagToSearchCriteria($criteria)
+                : $criteria->compile();
 
             $searchResult = $this->performSearch($searchCriteria);
 
             if ($searchResult->isEmpty()) {
-                return [];
+                return;
             }
 
-            return $this->fetchMessages($searchResult->uids);
+            // Compress the UID list to sequence ranges (e.g. 1:5,7,9:12)
+            // before sending. A literal comma list of 10k UIDs is ~50 KB on
+            // the wire and the server processes it noticeably slower than a
+            // compact range expression.
+            $set = $this->compressUidsToSet($searchResult->uids);
+
+            yield from $this->streamFetchMessages($set, useUid: true);
         });
     }
 
@@ -302,8 +315,74 @@ class Folder implements FolderInterface
             return [];
         }
 
-        $uidList = implode(',', array_map(fn(Uid $u) => $u->value, $uids));
+        $set = $this->compressUidsToSet($uids);
 
+        return iterator_to_array($this->streamFetchMessages($set, useUid: true), false);
+    }
+
+    /**
+     * Stream messages from a UID FETCH (or sequence FETCH) so the
+     * MessageCollection can hand them to consumers as they arrive instead of
+     * buffering all of them in memory before the first `foreach` iteration.
+     *
+     * The OBJECTID quirk handling lives here too: if a server advertises the
+     * capability but rejects EMAILID/THREADID, we catch the BAD on the first
+     * attempt (which always arrives before any FETCH untagged response, so
+     * nothing has been yielded yet) and re-issue the FETCH with the items
+     * stripped.
+     *
+     * @return \Generator<int, MessageInterface>
+     */
+    private function streamFetchMessages(string $sequenceSet, bool $useUid): \Generator
+    {
+        $command = $useUid ? 'UID FETCH' : 'FETCH';
+        [$fetchItems, $wantObjectId, $baseItems] = $this->buildFetchItems();
+
+        try {
+            foreach ($this->transceiver->commandStreamingFetch(
+                $command,
+                $sequenceSet,
+                '(' . implode(' ', $fetchItems) . ')',
+            ) as $untagged) {
+                $message = $this->messageFromFetchData($untagged->data);
+                if ($message !== null) {
+                    yield $message;
+                }
+            }
+
+            return;
+        } catch (\D4ry\ImapClient\Exception\CommandException $e) {
+            $isObjectIdReject = $wantObjectId
+                && $e->status === 'BAD'
+                && (
+                    stripos($e->responseText, 'EMAILID') !== false
+                    || stripos($e->responseText, 'THREADID') !== false
+                );
+
+            if (!$isObjectIdReject) {
+                throw $e;
+            }
+
+            $this->transceiver->objectIdFetchItemsDisabled = true;
+        }
+
+        foreach ($this->transceiver->commandStreamingFetch(
+            $command,
+            $sequenceSet,
+            '(' . implode(' ', $baseItems) . ')',
+        ) as $untagged) {
+            $message = $this->messageFromFetchData($untagged->data);
+            if ($message !== null) {
+                yield $message;
+            }
+        }
+    }
+
+    /**
+     * @return array{0: string[], 1: bool, 2: string[]}
+     */
+    private function buildFetchItems(): array
+    {
         $baseItems = ['UID', 'FLAGS', 'ENVELOPE', 'INTERNALDATE', 'RFC822.SIZE'];
 
         if ($this->transceiver->hasCapability(\D4ry\ImapClient\Enum\Capability::Condstore)) {
@@ -319,80 +398,83 @@ class Folder implements FolderInterface
             $fetchItems[] = 'THREADID';
         }
 
-        try {
-            $response = $this->transceiver->command(
-                'UID FETCH',
-                $uidList,
-                '(' . implode(' ', $fetchItems) . ')',
-            );
-        } catch (\D4ry\ImapClient\Exception\CommandException $e) {
-            // Some servers (notably certain Dovecot builds) advertise the
-            // OBJECTID capability but reject EMAILID/THREADID in UID FETCH
-            // with a BAD response. Detect that exact failure mode, suppress
-            // those items for the remainder of this connection, and retry
-            // once. Anything else re-throws.
-            $isObjectIdReject = $wantObjectId
-                && $e->status === 'BAD'
-                && (
-                    stripos($e->responseText, 'EMAILID') !== false
-                    || stripos($e->responseText, 'THREADID') !== false
-                );
+        return [$fetchItems, $wantObjectId, $baseItems];
+    }
 
-            if (!$isObjectIdReject) {
-                throw $e;
-            }
-
-            $this->transceiver->objectIdFetchItemsDisabled = true;
-
-            $response = $this->transceiver->command(
-                'UID FETCH',
-                $uidList,
-                '(' . implode(' ', $baseItems) . ')',
-            );
+    private function messageFromFetchData(array $data): ?Message
+    {
+        $uid = $data['UID'] ?? null;
+        if (!$uid instanceof Uid) {
+            return null;
         }
 
-        $messages = [];
+        $envelope = $data['ENVELOPE'] ?? new Envelope(null, null, [], [], [], [], [], [], null, null);
+        $flags = $data['FLAGS'] ?? new FlagSet();
+        $dateStr = $data['INTERNALDATE'] ?? null;
+        $size = $data['RFC822.SIZE'] ?? 0;
 
-        foreach ($response->untagged as $untagged) {
-            if ($untagged->type !== 'FETCH' || !is_array($untagged->data)) {
+        $date = new \DateTimeImmutable();
+        if ($dateStr !== null) {
+            try {
+                $date = ImapDateFormatter::parse($dateStr);
+            } catch (\Exception) {
+            }
+        }
+
+        return new Message(
+            transceiver: $this->transceiver,
+            uid: $uid,
+            sequenceNumber: new SequenceNumber($data['seq'] ?? 0),
+            envelope: $envelope,
+            flags: $flags,
+            internalDate: $date,
+            size: $size,
+            folderPath: $this->mailboxPath->path,
+            emailIdValue: $data['EMAILID'] ?? null,
+            threadIdValue: $data['THREADID'] ?? null,
+            modSeqValue: $data['MODSEQ'] ?? null,
+        );
+    }
+
+    /**
+     * Compress a UID list into an IMAP sequence-set with contiguous ranges,
+     * e.g. [1,2,3,5,7,8] → "1:3,5,7:8". Drastically shrinks the UID FETCH
+     * command line for mailboxes where most UIDs are contiguous (the common
+     * case for "all messages" SEARCH results).
+     *
+     * @param Uid[] $uids
+     */
+    private function compressUidsToSet(array $uids): string
+    {
+        $values = [];
+        foreach ($uids as $uid) {
+            $values[] = $uid->value;
+        }
+        sort($values);
+
+        $ranges = [];
+        $start = $end = $values[0];
+
+        $count = count($values);
+        for ($i = 1; $i < $count; $i++) {
+            $value = $values[$i];
+
+            if ($value === $end + 1) {
+                $end = $value;
                 continue;
             }
 
-            $data = $untagged->data;
-            $uid = $data['UID'] ?? null;
-            if (!$uid instanceof Uid) {
-                continue;
+            if ($value === $end) {
+                continue; // dedupe duplicate UIDs
             }
 
-            $envelope = $data['ENVELOPE'] ?? new Envelope(null, null, [], [], [], [], [], [], null, null);
-            $flags = $data['FLAGS'] ?? new FlagSet();
-            $dateStr = $data['INTERNALDATE'] ?? null;
-            $size = $data['RFC822.SIZE'] ?? 0;
-
-            $date = new \DateTimeImmutable();
-            if ($dateStr !== null) {
-                try {
-                    $date = ImapDateFormatter::parse($dateStr);
-                } catch (\Exception) {
-                }
-            }
-
-            $messages[] = new Message(
-                transceiver: $this->transceiver,
-                uid: $uid,
-                sequenceNumber: new SequenceNumber($data['seq'] ?? 0),
-                envelope: $envelope,
-                flags: $flags,
-                internalDate: $date,
-                size: $size,
-                folderPath: $this->mailboxPath->path,
-                emailIdValue: $data['EMAILID'] ?? null,
-                threadIdValue: $data['THREADID'] ?? null,
-                modSeqValue: $data['MODSEQ'] ?? null,
-            );
+            $ranges[] = $start === $end ? (string) $start : $start . ':' . $end;
+            $start = $end = $value;
         }
 
-        return $messages;
+        $ranges[] = $start === $end ? (string) $start : $start . ':' . $end;
+
+        return implode(',', $ranges);
     }
 
     private function flagToSearchCriteria(Flag $flag): string

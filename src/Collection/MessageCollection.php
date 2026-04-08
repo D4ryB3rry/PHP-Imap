@@ -17,7 +17,14 @@ class MessageCollection implements \IteratorAggregate, \Countable, \ArrayAccess
     private ?array $messages = null;
 
     /**
-     * @param \Closure(): MessageInterface[] $loader
+     * @param \Closure(): (MessageInterface[]|iterable<MessageInterface>) $loader
+     *
+     * The loader may return either a fully materialized array or any
+     * iterable (typically a Generator) that yields messages as they arrive
+     * from the server. Generator-backed loaders allow `foreach` consumers to
+     * begin processing messages while the rest of the response is still in
+     * flight on the wire — see {@see Folder::messages()} for the streaming
+     * UID FETCH path.
      */
     public function __construct(
         private readonly \Closure $loader,
@@ -37,7 +44,36 @@ class MessageCollection implements \IteratorAggregate, \Countable, \ArrayAccess
 
     public function getIterator(): \Traversable
     {
-        return new \ArrayIterator($this->load());
+        if ($this->messages !== null) {
+            return new \ArrayIterator($this->messages);
+        }
+
+        return $this->streamMessages();
+    }
+
+    /**
+     * @return \Generator<int, MessageInterface>
+     */
+    private function streamMessages(): \Generator
+    {
+        $result = ($this->loader)();
+
+        if (is_array($result)) {
+            $this->messages = $result;
+            foreach ($result as $message) {
+                yield $message;
+            }
+
+            return;
+        }
+
+        $buffer = [];
+        foreach ($result as $message) {
+            $buffer[] = $message;
+            yield $message;
+        }
+
+        $this->messages = $buffer;
     }
 
     public function count(): int
@@ -93,8 +129,16 @@ class MessageCollection implements \IteratorAggregate, \Countable, \ArrayAccess
      */
     private function load(): array
     {
-        if ($this->messages === null) {
-            $this->messages = ($this->loader)();
+        if ($this->messages !== null) {
+            return $this->messages;
+        }
+
+        $result = ($this->loader)();
+
+        if (is_array($result)) {
+            $this->messages = $result;
+        } else {
+            $this->messages = iterator_to_array($result, false);
         }
 
         return $this->messages;

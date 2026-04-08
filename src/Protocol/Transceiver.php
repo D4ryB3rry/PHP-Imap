@@ -85,6 +85,43 @@ class Transceiver implements TransceiverInterface
         return $response;
     }
 
+    /**
+     * Streaming variant of command() that yields each untagged FETCH response
+     * as soon as the parser produces it. Use this for large UID FETCH bursts
+     * (e.g. fetching envelopes for tens of thousands of messages) so that
+     * consumers can start working on the first messages while later ones are
+     * still in flight on the wire.
+     *
+     * Non-FETCH untagged responses are still post-processed for capability /
+     * state tracking after the tagged response arrives, identical to the
+     * behavior of command().
+     *
+     * @return \Generator<int, UntaggedResponse, mixed, Response>
+     */
+    public function commandStreamingFetch(string $name, string ...$args): \Generator
+    {
+        $tag = $this->tagGenerator->next();
+
+        $command = new Command($tag, $name, $args);
+
+        $this->connection->write($command->compile());
+
+        $response = yield from $this->parser->readResponseStreamingFetch($tag->value);
+
+        $this->processUntaggedResponses($response);
+
+        if ($response->status === ResponseStatus::No || $response->status === ResponseStatus::Bad) {
+            throw new CommandException(
+                tag: $tag->value,
+                command: $name,
+                responseText: $response->text,
+                status: $response->status->value,
+            );
+        }
+
+        return $response;
+    }
+
     public function commandRaw(string $rawLine): Response
     {
         $tag = $this->tagGenerator->next();

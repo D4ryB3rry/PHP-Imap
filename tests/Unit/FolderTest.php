@@ -300,16 +300,17 @@ final class FolderTest extends TestCase
         self::assertSame(SpecialUse::Sent, $children->byName('Sent')?->specialUse());
     }
 
-    public function testMessagesWithoutCriteriaSelectsSearchesAndFetches(): void
+    public function testMessagesWithoutCriteriaSelectsAndFetchesSequenceRange(): void
     {
+        // The unfiltered fast path skips UID SEARCH entirely and FETCHes the
+        // whole mailbox by sequence range — saves a roundtrip and avoids
+        // shipping a potentially huge UID list back and forth.
         $connection = new FakeConnection();
         $connection->queueLines(
             'A0001 OK SELECT done',
-            '* SEARCH 100 200',
-            'A0002 OK SEARCH done',
             '* 1 FETCH (UID 100 FLAGS (\Seen) INTERNALDATE "01-Jan-2024 12:00:00 +0000" RFC822.SIZE 1234 ENVELOPE (NIL NIL NIL NIL NIL NIL NIL NIL NIL NIL))',
             '* 2 FETCH (UID 200 FLAGS () INTERNALDATE "02-Jan-2024 12:00:00 +0000" RFC822.SIZE 5678 ENVELOPE (NIL NIL NIL NIL NIL NIL NIL NIL NIL NIL))',
-            'A0003 OK FETCH done',
+            'A0002 OK FETCH done',
         );
 
         [$folder] = $this->makeFolder($connection);
@@ -318,8 +319,9 @@ final class FolderTest extends TestCase
         self::assertSame(2, $messages->count());
         self::assertSame(100, $messages[0]->uid()->value);
         self::assertSame(200, $messages[1]->uid()->value);
-        self::assertSame("A0002 UID SEARCH ALL\r\n", $connection->writes[1]);
-        self::assertStringContainsString('UID FETCH 100,200', $connection->writes[2]);
+        self::assertStringStartsWith('A0001 SELECT', $connection->writes[0]);
+        self::assertStringStartsWith('A0002 FETCH 1:*', $connection->writes[1]);
+        self::assertStringNotContainsString('SEARCH', $connection->writes[1]);
     }
 
     public function testMessagesWithFlagCriteria(): void
@@ -355,6 +357,66 @@ final class FolderTest extends TestCase
         self::assertTrue($result->isEmpty());
 
         self::assertSame("A0002 UID SEARCH UNSEEN SUBJECT \"hello\"\r\n", $connection->writes[1]);
+    }
+
+    public function testMessagesWithCriteriaCompressesUidRangesAndStreams(): void
+    {
+        // Server returns 6 UIDs that compress to "1:3,7,9:10" — verifies both
+        // the criteria-with-results streaming branch and that contiguous-range
+        // compression actually shows up on the wire.
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            'A0001 OK SELECT done',
+            '* SEARCH 1 2 3 7 9 10',
+            'A0002 OK SEARCH done',
+            '* 1 FETCH (UID 1 FLAGS () INTERNALDATE "01-Jan-2024 12:00:00 +0000" RFC822.SIZE 1 ENVELOPE (NIL NIL NIL NIL NIL NIL NIL NIL NIL NIL))',
+            '* 2 FETCH (UID 2 FLAGS () INTERNALDATE "01-Jan-2024 12:00:00 +0000" RFC822.SIZE 1 ENVELOPE (NIL NIL NIL NIL NIL NIL NIL NIL NIL NIL))',
+            '* 3 FETCH (UID 3 FLAGS () INTERNALDATE "01-Jan-2024 12:00:00 +0000" RFC822.SIZE 1 ENVELOPE (NIL NIL NIL NIL NIL NIL NIL NIL NIL NIL))',
+            '* 4 FETCH (UID 7 FLAGS () INTERNALDATE "01-Jan-2024 12:00:00 +0000" RFC822.SIZE 1 ENVELOPE (NIL NIL NIL NIL NIL NIL NIL NIL NIL NIL))',
+            '* 5 FETCH (UID 9 FLAGS () INTERNALDATE "01-Jan-2024 12:00:00 +0000" RFC822.SIZE 1 ENVELOPE (NIL NIL NIL NIL NIL NIL NIL NIL NIL NIL))',
+            '* 6 FETCH (UID 10 FLAGS () INTERNALDATE "01-Jan-2024 12:00:00 +0000" RFC822.SIZE 1 ENVELOPE (NIL NIL NIL NIL NIL NIL NIL NIL NIL NIL))',
+            'A0003 OK FETCH done',
+        );
+
+        [$folder] = $this->makeFolder($connection);
+
+        $messages = $folder->messages(Flag::Seen);
+        $iterated = [];
+        foreach ($messages as $m) {
+            $iterated[] = $m->uid()->value;
+        }
+
+        self::assertSame([1, 2, 3, 7, 9, 10], $iterated);
+        self::assertStringContainsString('UID FETCH 1:3,7,9:10', $connection->writes[2]);
+    }
+
+    /**
+     * @return iterable<string, array{Uid[], string}>
+     */
+    public static function uidCompressionProvider(): iterable
+    {
+        $u = static fn(int $v) => new Uid($v);
+
+        yield 'single uid' => [[$u(42)], '42'];
+        yield 'all contiguous' => [[$u(1), $u(2), $u(3), $u(4)], '1:4'];
+        yield 'all isolated' => [[$u(1), $u(3), $u(5)], '1,3,5'];
+        yield 'mixed' => [[$u(1), $u(2), $u(3), $u(7), $u(9), $u(10)], '1:3,7,9:10'];
+        yield 'unsorted input' => [[$u(10), $u(2), $u(1), $u(3)], '1:3,10'];
+        yield 'duplicates dropped' => [[$u(1), $u(1), $u(2), $u(2), $u(5)], '1:2,5'];
+    }
+
+    /**
+     * @param Uid[] $uids
+     */
+    #[DataProvider('uidCompressionProvider')]
+    public function testCompressUidsToSet(array $uids, string $expected): void
+    {
+        $connection = new FakeConnection();
+        [$folder] = $this->makeFolder($connection);
+
+        $method = new ReflectionMethod(Folder::class, 'compressUidsToSet');
+
+        self::assertSame($expected, $method->invoke($folder, $uids));
     }
 
     public function testMessageReturnsSingleResult(): void
@@ -479,14 +541,12 @@ final class FolderTest extends TestCase
         $connection = new FakeConnection();
         $connection->queueLines(
             'A0001 OK SELECT done',
-            '* SEARCH 1',
-            'A0002 OK SEARCH done',
             // First untagged is not a FETCH (covers the type !== FETCH continue).
             '* OK Some informational line',
             // Second untagged is a FETCH but carries no UID key (covers the
             // !($uid instanceof Uid) continue).
             '* 1 FETCH (FLAGS () INTERNALDATE "01-Jan-2024 12:00:00 +0000" RFC822.SIZE 1 ENVELOPE (NIL NIL NIL NIL NIL NIL NIL NIL NIL NIL))',
-            'A0003 OK FETCH done',
+            'A0002 OK FETCH done',
         );
 
         [$folder] = $this->makeFolder($connection);
@@ -501,10 +561,8 @@ final class FolderTest extends TestCase
         $connection = new FakeConnection();
         $connection->queueLines(
             'A0001 OK SELECT done',
-            '* SEARCH 9',
-            'A0002 OK SEARCH done',
             '* 1 FETCH (UID 9 FLAGS () INTERNALDATE "garbage" RFC822.SIZE 1 ENVELOPE (NIL NIL NIL NIL NIL NIL NIL NIL NIL NIL))',
-            'A0003 OK FETCH done',
+            'A0002 OK FETCH done',
         );
 
         [$folder] = $this->makeFolder($connection);
@@ -569,10 +627,8 @@ final class FolderTest extends TestCase
         $connection = new FakeConnection();
         $connection->queueLines(
             'A0001 OK SELECT done',
-            '* SEARCH 7',
-            'A0002 OK SEARCH done',
             '* 1 FETCH (UID 7 FLAGS () INTERNALDATE "01-Jan-2024 12:00:00 +0000" RFC822.SIZE 1 ENVELOPE (NIL NIL NIL NIL NIL NIL NIL NIL NIL NIL) MODSEQ (99) EMAILID (M0001) THREADID (T0001))',
-            'A0003 OK FETCH done',
+            'A0002 OK FETCH done',
         );
 
         [$folder] = $this->makeFolder($connection, 'INBOX', null, [Capability::Condstore, Capability::ObjectId]);
@@ -585,27 +641,25 @@ final class FolderTest extends TestCase
         self::assertSame('T0001', $msg->threadId());
         self::assertSame(99, $msg->modSeq());
 
-        self::assertStringContainsString('MODSEQ', $connection->writes[2]);
-        self::assertStringContainsString('EMAILID', $connection->writes[2]);
-        self::assertStringContainsString('THREADID', $connection->writes[2]);
+        self::assertStringContainsString('MODSEQ', $connection->writes[1]);
+        self::assertStringContainsString('EMAILID', $connection->writes[1]);
+        self::assertStringContainsString('THREADID', $connection->writes[1]);
     }
 
     public function testFetchMessagesFallsBackWhenServerRejectsObjectIdItems(): void
     {
         // Reproduces a Dovecot quirk: server advertises OBJECTID in CAPABILITY
-        // but rejects EMAILID/THREADID inside UID FETCH with a BAD response.
+        // but rejects EMAILID/THREADID inside FETCH with a BAD response.
         // The Folder must catch that, suppress the items for the rest of the
         // connection, and retry once.
         $connection = new FakeConnection();
         $connection->queueLines(
             'A0001 OK SELECT done',
-            '* SEARCH 7',
-            'A0002 OK SEARCH done',
-            // First UID FETCH attempt: server rejects EMAILID.
-            'A0003 BAD Error in IMAP command UID FETCH: Unknown parameter: EMAILID',
+            // First FETCH attempt: server rejects EMAILID.
+            'A0002 BAD Error in IMAP command FETCH: Unknown parameter: EMAILID',
             // Retry without EMAILID/THREADID: server accepts.
             '* 1 FETCH (UID 7 FLAGS () INTERNALDATE "01-Jan-2024 12:00:00 +0000" RFC822.SIZE 1 ENVELOPE (NIL NIL NIL NIL NIL NIL NIL NIL NIL NIL))',
-            'A0004 OK FETCH done',
+            'A0003 OK FETCH done',
         );
 
         [$folder, $transceiver] = $this->makeFolder(
@@ -620,13 +674,13 @@ final class FolderTest extends TestCase
         self::assertSame(7, $messages[0]->uid()->value);
 
         // First attempt did include the OBJECTID items.
-        self::assertStringContainsString('EMAILID', $connection->writes[2]);
-        self::assertStringContainsString('THREADID', $connection->writes[2]);
+        self::assertStringContainsString('EMAILID', $connection->writes[1]);
+        self::assertStringContainsString('THREADID', $connection->writes[1]);
 
         // Retry stripped them.
-        self::assertStringNotContainsString('EMAILID', $connection->writes[3]);
-        self::assertStringNotContainsString('THREADID', $connection->writes[3]);
-        self::assertStringContainsString('UID FETCH 7', $connection->writes[3]);
+        self::assertStringNotContainsString('EMAILID', $connection->writes[2]);
+        self::assertStringNotContainsString('THREADID', $connection->writes[2]);
+        self::assertStringContainsString('FETCH 1:*', $connection->writes[2]);
 
         // Suppression flag is now set on the transceiver.
         self::assertTrue($transceiver->objectIdFetchItemsDisabled);
@@ -637,9 +691,7 @@ final class FolderTest extends TestCase
         $connection = new FakeConnection();
         $connection->queueLines(
             'A0001 OK SELECT done',
-            '* SEARCH 7',
-            'A0002 OK SEARCH done',
-            'A0003 BAD Mailbox is in inconsistent state',
+            'A0002 BAD Mailbox is in inconsistent state',
         );
 
         [$folder] = $this->makeFolder(

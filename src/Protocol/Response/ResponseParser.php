@@ -68,6 +68,56 @@ class ResponseParser
         }
     }
 
+    /**
+     * Streaming variant of readResponse() that yields each untagged FETCH
+     * response as soon as it has been parsed, instead of buffering the entire
+     * response in memory before any consumer sees it.
+     *
+     * Non-FETCH untagged lines are still buffered (they're rare and the
+     * Transceiver needs them for capability/state tracking).
+     *
+     * The Generator returns the final tagged Response object via its return
+     * value, so callers must consume the generator with `yield from` (or
+     * iterate it fully and call `getReturn()`).
+     *
+     * @return \Generator<int, UntaggedResponse, mixed, Response>
+     */
+    public function readResponseStreamingFetch(string $expectedTag): \Generator
+    {
+        $untagged = [];
+
+        while (true) {
+            $line = $this->readFullLine();
+
+            if (str_starts_with($line, '* ')) {
+                $parsed = $this->parseUntaggedLine($line);
+
+                if ($parsed->type === 'FETCH') {
+                    yield $parsed;
+                } else {
+                    $untagged[] = $parsed;
+                }
+
+                continue;
+            }
+
+            if ($line === '+' || str_starts_with($line, '+ ')) {
+                return new Response(
+                    status: ResponseStatus::Ok,
+                    tag: '+',
+                    text: $line === '+' ? '' : trim(substr($line, 2)),
+                    untagged: $untagged,
+                );
+            }
+
+            if (str_starts_with($line, $expectedTag . ' ')) {
+                return $this->parseTaggedLine($line, $expectedTag, $untagged);
+            }
+
+            $untagged[] = new UntaggedResponse('UNKNOWN', null, $line);
+        }
+    }
+
     public function readContinuation(): string
     {
         $line = $this->readFullLine();
@@ -270,14 +320,23 @@ class ResponseParser
     {
         $result = ['seq' => $sequenceNumber];
 
-        if (!preg_match('/^\((.+)\)$/s', trim($data), $matches)) {
+        $trimmed = ltrim($data);
+        if ($trimmed === '' || $trimmed[0] !== '(') {
             return $result;
         }
 
-        $parser = new FetchResponseParser($matches[1]);
-        $result = array_merge($result, $parser->parse());
+        // Strip the outer parens. The closing paren is always the last
+        // non-whitespace byte for a well-formed FETCH payload.
+        $end = strrpos($trimmed, ')');
+        if ($end === false || $end < 1) {
+            return $result;
+        }
 
-        return $result;
+        $inner = substr($trimmed, 1, $end - 1);
+
+        $parser = new FetchResponseParser($inner);
+
+        return $result + $parser->parse();
     }
 
     private function extractResponseData(string $rest, string $prefix): string
