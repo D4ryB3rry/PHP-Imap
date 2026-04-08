@@ -413,8 +413,6 @@ final class ResponseParserTest extends TestCase
 
     public function testReadResponseListWithNilDelimiter(): void
     {
-        // NIL is captured literally by the LIST regex (the dedicated NIL branch
-        // is currently unreachable due to greedy matching).
         $connection = new FakeConnection();
         $connection->queueLines(
             '* LIST (\\Noselect) NIL "Foo"',
@@ -425,7 +423,23 @@ final class ResponseParserTest extends TestCase
         $list = $response->untagged[0];
 
         self::assertSame(['\\Noselect'], $list->data['attributes']);
-        self::assertSame('NIL', $list->data['delimiter']);
+        self::assertSame('', $list->data['delimiter']);
+        self::assertSame('Foo', $list->data['name']);
+    }
+
+    public function testReadResponseListWithNilDelimiterAndEmptyAttributes(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            '* LIST () NIL "Foo"',
+            'A0001 OK done',
+        );
+
+        $response = $this->makeParser($connection)->readResponse('A0001');
+        $list = $response->untagged[0];
+
+        self::assertSame([], $list->data['attributes']);
+        self::assertSame('', $list->data['delimiter']);
         self::assertSame('Foo', $list->data['name']);
     }
 

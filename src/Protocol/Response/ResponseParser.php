@@ -214,18 +214,18 @@ class ResponseParser
     {
         $result = ['attributes' => [], 'delimiter' => '', 'name' => ''];
 
-        if (preg_match('/^\(([^)]*)\)\s+"?([^"]*)"?\s+"?([^"]*)"?\s*$/', $data, $matches)) {
-            $result['attributes'] = $matches[1] !== ''
-                ? preg_split('/\s+/', trim($matches[1]))
-                : [];
-            $result['delimiter'] = trim($matches[2], '"');
-            $result['name'] = trim($matches[3], '"');
-        } elseif (preg_match('/^\(([^)]*)\)\s+NIL\s+"?([^"]*)"?\s*$/', $data, $matches)) {
+        if (preg_match('/^\(([^)]*)\)\s+NIL\s+"?([^"]*)"?\s*$/', $data, $matches)) {
             $result['attributes'] = $matches[1] !== ''
                 ? preg_split('/\s+/', trim($matches[1]))
                 : [];
             $result['delimiter'] = '';
             $result['name'] = trim($matches[2], '"');
+        } elseif (preg_match('/^\(([^)]*)\)\s+"?([^"]*)"?\s+"?([^"]*)"?\s*$/', $data, $matches)) {
+            $result['attributes'] = $matches[1] !== ''
+                ? preg_split('/\s+/', trim($matches[1]))
+                : [];
+            $result['delimiter'] = trim($matches[2], '"');
+            $result['name'] = trim($matches[3], '"');
         }
 
         return $result;

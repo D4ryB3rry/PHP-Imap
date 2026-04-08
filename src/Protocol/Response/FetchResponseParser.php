@@ -573,10 +573,6 @@ class FetchResponseParser
 
     private function skipNestedParens(): void
     {
-        if ($this->peek() !== '(') {
-            return;
-        }
-
         $this->pos++;
         $depth = 1;
 

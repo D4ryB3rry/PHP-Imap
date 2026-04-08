@@ -421,4 +421,22 @@ final class FetchResponseParserTest extends TestCase
         self::assertSame('alice@a.com', $parsed['ENVELOPE']->from[0]->email());
         self::assertSame('bob@b.com', $parsed['ENVELOPE']->from[1]->email());
     }
+
+    public function testParsesEmailIdAtEndOfInputReturnsNull(): void
+    {
+        // 'EMAILID ' (trailing space) leaves the parser at EOF inside
+        // readParenthesizedSingle: isNil() takes its insufficient-bytes
+        // early-return, then readNString() takes its EOF early-return.
+        $parsed = (new FetchResponseParser('EMAILID '))->parse();
+
+        self::assertArrayHasKey('EMAILID', $parsed);
+        self::assertNull($parsed['EMAILID']);
+    }
+
+    public function testParsesEmailIdWithSingleCharValue(): void
+    {
+        $parsed = (new FetchResponseParser('EMAILID X'))->parse();
+
+        self::assertSame('X', $parsed['EMAILID']);
+    }
 }
