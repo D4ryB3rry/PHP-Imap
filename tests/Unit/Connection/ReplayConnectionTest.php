@@ -232,6 +232,19 @@ final class ReplayConnectionTest extends TestCase
         $replay->readLine();
     }
 
+    public function testSetReadTimeoutIsNoop(): void
+    {
+        $this->writeJsonl([
+            ['t' => 'close'],
+        ]);
+
+        $replay = new ReplayConnection($this->recordPath);
+        $replay->setReadTimeout(7.5); // No-op; must not advance cursor or throw.
+        $replay->close();
+
+        self::assertFalse($replay->isConnected());
+    }
+
     public function testStringFieldRejectsNonString(): void
     {
         $this->writeJsonl([

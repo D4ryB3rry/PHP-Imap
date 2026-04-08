@@ -32,6 +32,8 @@ final class FakeConnection implements ConnectionInterface
 
     public bool $tlsEnabled = false;
 
+    public ?float $lastReadTimeout = null;
+
     public function queueLines(string ...$lines): void
     {
         foreach ($lines as $line) {
@@ -53,6 +55,7 @@ final class FakeConnection implements ConnectionInterface
 
     public function setReadTimeout(float $timeout): void
     {
+        $this->lastReadTimeout = $timeout;
     }
 
     public function readLine(): string

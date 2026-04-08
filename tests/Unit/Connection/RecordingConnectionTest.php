@@ -104,6 +104,17 @@ final class RecordingConnectionTest extends TestCase
         self::assertSame("A0001 LOGIN \"alice\" \"hunter2\"\r\n", $writes[0]['data']);
     }
 
+    public function testSetReadTimeoutDelegates(): void
+    {
+        $inner = new FakeConnection();
+        $rec = new RecordingConnection($inner, $this->recordPath);
+
+        $rec->setReadTimeout(2.5);
+        $rec->close();
+
+        self::assertSame(2.5, $inner->lastReadTimeout);
+    }
+
     public function testIsConnectedDelegates(): void
     {
         $inner = new FakeConnection();

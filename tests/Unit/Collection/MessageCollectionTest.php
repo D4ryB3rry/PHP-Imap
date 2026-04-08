@@ -76,6 +76,70 @@ final class MessageCollectionTest extends TestCase
         self::assertSame($b, $collection[1]);
     }
 
+    public function testIteratorStreamsFromGeneratorAndCachesResult(): void
+    {
+        $a = $this->createStub(MessageInterface::class);
+        $b = $this->createStub(MessageInterface::class);
+        $calls = 0;
+        $collection = new MessageCollection(function () use (&$calls, $a, $b) {
+            $calls++;
+            yield $a;
+            yield $b;
+        });
+
+        $iterated = [];
+        foreach ($collection as $m) {
+            $iterated[] = $m;
+        }
+        self::assertSame([$a, $b], $iterated);
+
+        // Subsequent operations must use the cached buffer, not invoke the loader again.
+        self::assertSame(2, $collection->count());
+        self::assertSame([$a, $b], $collection->toArray());
+        self::assertSame(1, $calls);
+
+        // After caching, getIterator returns an ArrayIterator over the buffer.
+        $second = [];
+        foreach ($collection as $m) {
+            $second[] = $m;
+        }
+        self::assertSame([$a, $b], $second);
+        self::assertSame(1, $calls);
+    }
+
+    public function testIteratorWithArrayLoaderCachesAndYields(): void
+    {
+        $a = $this->createStub(MessageInterface::class);
+        $messages = [$a];
+        $calls = 0;
+        $collection = new MessageCollection(function () use (&$calls, $messages) {
+            $calls++;
+            return $messages;
+        });
+
+        $iterated = [];
+        foreach ($collection as $m) {
+            $iterated[] = $m;
+        }
+        self::assertSame($messages, $iterated);
+        self::assertSame(1, $collection->count());
+        self::assertSame(1, $calls);
+    }
+
+    public function testLoadConvertsIteratorWhenAccessedBeforeIteration(): void
+    {
+        $a = $this->createStub(MessageInterface::class);
+        $b = $this->createStub(MessageInterface::class);
+        $collection = new MessageCollection(function () use ($a, $b) {
+            yield $a;
+            yield $b;
+        });
+
+        // count() calls load() before any foreach — exercises the iterator_to_array branch.
+        self::assertSame(2, $collection->count());
+        self::assertSame([$a, $b], $collection->toArray());
+    }
+
     public function testOffsetSetThrows(): void
     {
         $collection = MessageCollection::fromArray([]);
