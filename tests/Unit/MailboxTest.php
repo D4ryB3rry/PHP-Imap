@@ -67,6 +67,7 @@ use ReflectionProperty;
 #[UsesClass(Config::class)]
 #[UsesClass(SocketConnection::class)]
 #[UsesClass(LoggingConnection::class)]
+#[UsesClass(\D4ry\ImapClient\Connection\Redactor::class)]
 #[UsesClass(\D4ry\ImapClient\Exception\TimeoutException::class)]
 final class MailboxTest extends TestCase
 {

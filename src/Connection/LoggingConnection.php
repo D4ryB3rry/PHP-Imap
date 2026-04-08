@@ -8,14 +8,34 @@ use D4ry\ImapClient\Connection\Contract\ConnectionInterface;
 use D4ry\ImapClient\Enum\Encryption;
 use D4ry\ImapClient\Exception\ConnectionException;
 
+/**
+ * Decorator that writes a human-readable trace of every I/O operation to a log file.
+ *
+ * SECURITY: Logs may contain sensitive data (subjects, recipients, message bodies)
+ * even with credential redaction enabled. Always review before sharing.
+ *
+ * Credential redaction is enabled by default and rewrites LOGIN / AUTHENTICATE
+ * payloads (both SASL-IR and continuation flows) before they reach the log file.
+ * The bytes sent to the inner connection are never modified.
+ */
 class LoggingConnection implements ConnectionInterface
 {
     /** @var resource */
     private $logHandle;
 
+    private readonly Redactor $redactor;
+
+    /**
+     * @param ConnectionInterface $inner               The wrapped connection — receives unmodified bytes.
+     * @param string              $logPath             File to append the trace to.
+     * @param bool                $redactCredentials   When true (default) LOGIN/AUTHENTICATE payloads are
+     *                                                  replaced with placeholders before logging. Set to false
+     *                                                  only when you genuinely need raw credentials in the log.
+     */
     public function __construct(
         private readonly ConnectionInterface $inner,
         string $logPath,
+        private readonly bool $redactCredentials = true,
     ) {
         $handle = @fopen($logPath, 'ab');
 
@@ -24,7 +44,8 @@ class LoggingConnection implements ConnectionInterface
         }
 
         $this->logHandle = $handle;
-        $this->log('---', sprintf('session start pid=%d', getmypid()));
+        $this->redactor = new Redactor();
+        $this->log('---', sprintf('session start pid=%d', (int) getmypid()));
     }
 
     public function open(string $host, int $port, Encryption $encryption, float $timeout, array $sslOptions = []): void
@@ -57,7 +78,7 @@ class LoggingConnection implements ConnectionInterface
     {
         try {
             $data = $this->inner->readBytes($count);
-            $this->log('S<', sprintf('[%d bytes] %s', $count, $this->preview($data)));
+            $this->log('S<', sprintf('[%d bytes] %s', strlen($data), $this->preview($data)));
 
             return $data;
         } catch (\Throwable $e) {
@@ -68,7 +89,13 @@ class LoggingConnection implements ConnectionInterface
 
     public function write(string $data): void
     {
-        $this->log('C:', rtrim($data, "\r\n"));
+        $line = rtrim($data, "\r\n");
+
+        if ($this->redactCredentials) {
+            $line = $this->redactor->redact($line);
+        }
+
+        $this->log('C:', $line);
 
         try {
             $this->inner->write($data);

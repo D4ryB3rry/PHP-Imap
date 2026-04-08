@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace D4ry\ImapClient\Tests\Unit\Connection;
 
 use D4ry\ImapClient\Connection\LoggingConnection;
+use D4ry\ImapClient\Connection\Redactor;
 use D4ry\ImapClient\Enum\Encryption;
 use D4ry\ImapClient\Exception\ConnectionException;
 use D4ry\ImapClient\Tests\Unit\Support\FakeConnection;
@@ -13,6 +14,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
 #[CoversClass(LoggingConnection::class)]
+#[CoversClass(Redactor::class)]
 final class LoggingConnectionTest extends TestCase
 {
     private string $logPath;
@@ -223,6 +225,61 @@ final class LoggingConnectionTest extends TestCase
         $logging->close();
 
         self::assertSame($contentsAfterFirst, $this->readLog());
+    }
+
+    public function testWriteRedactsLoginCommandByDefault(): void
+    {
+        $inner = new FakeConnection();
+        $logging = new LoggingConnection($inner, $this->logPath);
+
+        $logging->write("A0001 LOGIN \"alice\" \"hunter2\"\r\n");
+
+        // Wire bytes are unchanged — only the log is redacted.
+        self::assertSame(["A0001 LOGIN \"alice\" \"hunter2\"\r\n"], $inner->writes);
+
+        $contents = $this->readLog();
+        self::assertStringContainsString('C: A0001 LOGIN *** ***', $contents);
+        self::assertStringNotContainsString('hunter2', $contents);
+        self::assertStringNotContainsString('alice', $contents);
+    }
+
+    public function testWriteRedactsAuthenticatePlainSaslIrByDefault(): void
+    {
+        $inner = new FakeConnection();
+        $logging = new LoggingConnection($inner, $this->logPath);
+
+        $logging->write("A0001 AUTHENTICATE PLAIN AGZvbwBiYXI=\r\n");
+
+        self::assertSame(["A0001 AUTHENTICATE PLAIN AGZvbwBiYXI=\r\n"], $inner->writes);
+
+        $contents = $this->readLog();
+        self::assertStringContainsString('C: A0001 AUTHENTICATE PLAIN ***', $contents);
+        self::assertStringNotContainsString('AGZvbwBiYXI=', $contents);
+    }
+
+    public function testWriteRedactsAuthenticateContinuationFlow(): void
+    {
+        $inner = new FakeConnection();
+        $logging = new LoggingConnection($inner, $this->logPath);
+
+        $logging->write("A0001 AUTHENTICATE PLAIN\r\n");
+        $logging->write("AGZvbwBiYXI=\r\n");
+
+        $contents = $this->readLog();
+        self::assertStringContainsString('C: A0001 AUTHENTICATE PLAIN', $contents);
+        self::assertStringContainsString('C: *** [redacted auth payload]', $contents);
+        self::assertStringNotContainsString('AGZvbwBiYXI=', $contents);
+    }
+
+    public function testWriteDoesNotRedactWhenDisabled(): void
+    {
+        $inner = new FakeConnection();
+        $logging = new LoggingConnection($inner, $this->logPath, redactCredentials: false);
+
+        $logging->write("A0001 LOGIN \"alice\" \"hunter2\"\r\n");
+
+        $contents = $this->readLog();
+        self::assertStringContainsString('C: A0001 LOGIN "alice" "hunter2"', $contents);
     }
 
     public function testIsConnectedDelegates(): void
