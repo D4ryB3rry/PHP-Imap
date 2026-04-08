@@ -283,6 +283,97 @@ final class FolderTest extends TestCase
         self::assertSame("A0002 EXPUNGE\r\n", $connection->writes[1]);
     }
 
+    public function testMoveMessagesUsesUidMoveWithCompressedSetWhenCapable(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            'A0001 OK SELECT done',
+            'A0002 OK MOVE done',
+        );
+
+        [$folder] = $this->makeFolder($connection, caps: [Capability::Move]);
+
+        $folder->moveMessages(
+            [new Uid(1), new Uid(2), new Uid(3), new Uid(5), new Uid(7), new Uid(8)],
+            'Trash',
+        );
+
+        self::assertSame("A0001 SELECT INBOX\r\n", $connection->writes[0]);
+        self::assertSame("A0002 UID MOVE 1:3,5,7:8 Trash\r\n", $connection->writes[1]);
+        self::assertCount(2, $connection->writes);
+    }
+
+    public function testMoveMessagesAcceptsFolderInterfaceDestination(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            'A0001 OK SELECT done',
+            'A0002 OK MOVE done',
+        );
+
+        [$folder] = $this->makeFolder($connection, caps: [Capability::Move]);
+
+        $dest = $this->createStub(\D4ry\ImapClient\Contract\FolderInterface::class);
+        $dest->method('path')->willReturn(new MailboxPath('Archive'));
+
+        $folder->moveMessages([new Uid(42)], $dest);
+
+        self::assertSame("A0002 UID MOVE 42 Archive\r\n", $connection->writes[1]);
+    }
+
+    public function testMoveMessagesFallsBackToCopyAndStoreWithoutMoveCapability(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            'A0001 OK SELECT done',
+            'A0002 OK COPY done',
+            'A0003 OK STORE done',
+        );
+
+        [$folder] = $this->makeFolder($connection);
+
+        $folder->moveMessages([new Uid(10), new Uid(11), new Uid(12)], 'Trash');
+
+        self::assertSame("A0002 UID COPY 10:12 Trash\r\n", $connection->writes[1]);
+        self::assertSame("A0003 UID STORE 10:12 +FLAGS (\\Deleted)\r\n", $connection->writes[2]);
+    }
+
+    public function testMoveMessagesIsNoOpForEmptyUidList(): void
+    {
+        $connection = new FakeConnection();
+        [$folder] = $this->makeFolder($connection, caps: [Capability::Move]);
+
+        $folder->moveMessages([], 'Trash');
+
+        self::assertSame([], $connection->writes);
+    }
+
+    public function testCopyMessagesSendsSingleUidCopyWithCompressedSet(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            'A0001 OK SELECT done',
+            'A0002 OK COPY done',
+        );
+
+        [$folder] = $this->makeFolder($connection);
+
+        $folder->copyMessages([new Uid(1), new Uid(2), new Uid(3)], 'Archive');
+
+        self::assertSame("A0002 UID COPY 1:3 Archive\r\n", $connection->writes[1]);
+        self::assertCount(2, $connection->writes);
+    }
+
+    public function testCopyMessagesIsNoOpForEmptyUidList(): void
+    {
+        $connection = new FakeConnection();
+        [$folder] = $this->makeFolder($connection);
+
+        $folder->copyMessages([], 'Archive');
+
+        self::assertSame([], $connection->writes);
+    }
+
     public function testChildrenIsLazyAndParsesListResponse(): void
     {
         $connection = new FakeConnection();

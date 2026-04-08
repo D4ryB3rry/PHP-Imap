@@ -48,6 +48,16 @@ interface FolderInterface
 
     public function expunge(): void;
 
+    /**
+     * @param Uid[] $uids
+     */
+    public function moveMessages(array $uids, FolderInterface|string $destination): void;
+
+    /**
+     * @param Uid[] $uids
+     */
+    public function copyMessages(array $uids, FolderInterface|string $destination): void;
+
     public function children(): FolderCollection;
 
     public function append(string $rawMessage, array $flags = [], ?\DateTimeInterface $internalDate = null): ?Uid;

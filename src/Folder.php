@@ -267,6 +267,57 @@ class Folder implements FolderInterface
         $this->transceiver->command('EXPUNGE');
     }
 
+    /**
+     * Bulk-move a set of messages to another folder in a single round-trip
+     * (UID MOVE), or COPY + STORE \Deleted as a fallback when the server
+     * lacks the MOVE extension. Mirrors the semantics of {@see Message::moveTo()}
+     * but operates on a whole UID set at once — for 100 messages this collapses
+     * what would otherwise be 200 round-trips (FETCH + MOVE per UID) into one.
+     *
+     * @param Uid[] $uids
+     */
+    public function moveMessages(array $uids, FolderInterface|string $destination): void
+    {
+        if ($uids === []) {
+            return;
+        }
+
+        $this->select();
+
+        $set = $this->compressUidsToSet($uids);
+        $targetPath = $destination instanceof FolderInterface ? (string) $destination->path() : $destination;
+        $encoded = CommandBuilder::encodeMailboxName($targetPath, $this->transceiver->isUtf8Enabled());
+
+        if ($this->transceiver->hasCapability(\D4ry\ImapClient\Enum\Capability::Move)) {
+            $this->transceiver->command('UID MOVE', $set, $encoded);
+            return;
+        }
+
+        $this->transceiver->command('UID COPY', $set, $encoded);
+        $this->transceiver->command('UID STORE', $set, '+FLAGS', '(\\Deleted)');
+    }
+
+    /**
+     * Bulk-copy a set of messages to another folder in a single UID COPY
+     * round-trip.
+     *
+     * @param Uid[] $uids
+     */
+    public function copyMessages(array $uids, FolderInterface|string $destination): void
+    {
+        if ($uids === []) {
+            return;
+        }
+
+        $this->select();
+
+        $set = $this->compressUidsToSet($uids);
+        $targetPath = $destination instanceof FolderInterface ? (string) $destination->path() : $destination;
+        $encoded = CommandBuilder::encodeMailboxName($targetPath, $this->transceiver->isUtf8Enabled());
+
+        $this->transceiver->command('UID COPY', $set, $encoded);
+    }
+
     public function children(): FolderCollection
     {
         return new FolderCollection(function (): array {
