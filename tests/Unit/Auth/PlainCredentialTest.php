@@ -94,6 +94,20 @@ final class PlainCredentialTest extends TestCase
         (new PlainCredential('user', 'pass'))->authenticate($transceiver);
     }
 
+    public function testAuthenticateThrowsOnContinuationFlowFailure(): void
+    {
+        $connection = new FakeConnection();
+        $transceiver = new Transceiver($connection);
+        $this->seedCapabilities($transceiver, [Capability::Imap4rev1]);
+
+        $connection->queueLines('+ Ready', 'A0001 NO Bad credentials');
+
+        $this->expectException(AuthenticationException::class);
+        $this->expectExceptionMessage('PLAIN authentication failed: Bad credentials');
+
+        (new PlainCredential('user', 'pass'))->authenticate($transceiver);
+    }
+
     /**
      * @param Capability[] $capabilities
      */

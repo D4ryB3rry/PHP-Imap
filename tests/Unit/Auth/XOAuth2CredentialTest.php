@@ -106,6 +106,54 @@ final class XOAuth2CredentialTest extends TestCase
         self::assertSame('tok-refreshed', $credential->accessToken);
     }
 
+    public function testAuthenticateThrowsWhenSaslIrFailsWithoutRefresher(): void
+    {
+        $connection = new FakeConnection();
+        $transceiver = new Transceiver($connection);
+        $this->seedCapabilities($transceiver, [Capability::SaslIr]);
+
+        $connection->queueLines('A0001 NO Token expired');
+
+        $this->expectException(AuthenticationException::class);
+        $this->expectExceptionMessage('XOAUTH2 authentication failed: Token expired');
+
+        (new XOAuth2Credential('u@example.com', 'tok'))->authenticate($transceiver);
+    }
+
+    public function testAuthenticateContinuationFlowHappyPath(): void
+    {
+        $connection = new FakeConnection();
+        $transceiver = new Transceiver($connection);
+        $this->seedCapabilities($transceiver, [Capability::Imap4rev1]);
+
+        $connection->queueLines('+ Ready', 'A0001 OK Authenticated');
+
+        (new XOAuth2Credential('u@example.com', 'tok'))->authenticate($transceiver);
+
+        $expectedPayload = base64_encode("user=u@example.com\x01auth=Bearer tok\x01\x01");
+        self::assertSame(
+            [
+                "A0001 AUTHENTICATE XOAUTH2\r\n",
+                $expectedPayload . "\r\n",
+            ],
+            $connection->writes,
+        );
+    }
+
+    public function testAuthenticateContinuationFlowThrowsOnFailure(): void
+    {
+        $connection = new FakeConnection();
+        $transceiver = new Transceiver($connection);
+        $this->seedCapabilities($transceiver, [Capability::Imap4rev1]);
+
+        $connection->queueLines('+ Ready', 'A0001 NO Bad token');
+
+        $this->expectException(AuthenticationException::class);
+        $this->expectExceptionMessage('XOAUTH2 authentication failed: Bad token');
+
+        (new XOAuth2Credential('u@example.com', 'tok'))->authenticate($transceiver);
+    }
+
     public function testAuthenticateThrowsWhenRefreshAlsoFails(): void
     {
         $connection = new FakeConnection();
