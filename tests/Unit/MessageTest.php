@@ -339,4 +339,86 @@ final class MessageTest extends TestCase
         self::assertInstanceOf(AttachmentCollection::class, $attachments);
         self::assertSame(0, $attachments->count());
     }
+
+    public function testBodyStructureFallsBackToTextPlainWhenServerOmitsIt(): void
+    {
+        $connection = new FakeConnection();
+        // FETCH untagged exists but does not include BODYSTRUCTURE → loop
+        // skips it and the post-loop default kicks in.
+        $connection->queueLines(
+            '* 1 FETCH (UID 42)',
+            'A0001 OK FETCH done',
+        );
+
+        [$message] = $this->makeMessage($connection);
+
+        $structure = $message->bodyStructure();
+
+        self::assertSame('TEXT', $structure->type);
+        self::assertSame('PLAIN', $structure->subtype);
+    }
+
+    public function testRawBodyReturnsEmptyStringWhenServerOmitsBody(): void
+    {
+        $connection = new FakeConnection();
+        // No FETCH untagged at all → loop body never runs and the post-loop
+        // empty-string fallback executes.
+        $connection->queueLines('A0001 OK FETCH done');
+
+        [$message] = $this->makeMessage($connection);
+
+        self::assertSame('', $message->rawBody());
+    }
+
+    public function testSaveThrowsWhenDirectoryCannotBeCreated(): void
+    {
+        $connection = new FakeConnection();
+        // rawBody() must succeed before save() reaches the mkdir branch — but
+        // the mkdir failure throws first if we wire the path so the parent
+        // directory exists as a regular file.
+        $blocker = sys_get_temp_dir() . '/imap-save-blocker-' . uniqid('', true);
+        file_put_contents($blocker, '');
+
+        // mkdir() emits an E_WARNING when its parent path is a regular file;
+        // PHPUnit's failOnWarning would otherwise turn it into a test failure.
+        set_error_handler(static fn() => true, E_WARNING);
+
+        try {
+            [$message] = $this->makeMessage($connection);
+
+            $this->expectException(\RuntimeException::class);
+            $this->expectExceptionMessageMatches('/was not created/');
+
+            $message->save($blocker . '/nested/file.eml');
+        } finally {
+            restore_error_handler();
+            @unlink($blocker);
+        }
+    }
+
+    public function testAttachmentsWalksMultipartAndExtractsAttachmentPart(): void
+    {
+        $connection = new FakeConnection();
+        // multipart/mixed with one text/plain (no disposition → skipped) and
+        // one application/pdf with an ATTACHMENT disposition (collected).
+        $bodyStructure =
+            '(' .
+                '("TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "7BIT" 12 1 NIL NIL NIL)' .
+                '("APPLICATION" "PDF" ("NAME" "doc.pdf") NIL NIL "BASE64" 1234 NIL ' .
+                    '("ATTACHMENT" ("FILENAME" "doc.pdf")) NIL NIL)' .
+                ' "MIXED" NIL NIL NIL' .
+            ')';
+
+        $connection->queueLines(
+            '* 1 FETCH (UID 42 BODYSTRUCTURE ' . $bodyStructure . ')',
+            'A0001 OK FETCH done',
+        );
+
+        [$message] = $this->makeMessage($connection);
+
+        $attachments = $message->attachments();
+
+        self::assertSame(1, $attachments->count());
+        self::assertSame('doc.pdf', $attachments[0]->filename());
+    }
 }

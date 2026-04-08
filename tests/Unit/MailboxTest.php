@@ -18,14 +18,25 @@ use D4ry\ImapClient\Idle\IdleHeartbeatEvent;
 use D4ry\ImapClient\Idle\MessageExpungedEvent;
 use D4ry\ImapClient\Idle\MessageReceivedEvent;
 use D4ry\ImapClient\Idle\RecentCountEvent;
+use D4ry\ImapClient\Auth\LoginCredential;
+use D4ry\ImapClient\Config;
+use D4ry\ImapClient\Connection\LoggingConnection;
+use D4ry\ImapClient\Connection\SocketConnection;
+use D4ry\ImapClient\Enum\Encryption;
 use D4ry\ImapClient\Mailbox;
+use D4ry\ImapClient\Protocol\Response\Response;
+use D4ry\ImapClient\Protocol\Response\ResponseStatus;
+use D4ry\ImapClient\Protocol\Response\UntaggedResponse;
 use D4ry\ImapClient\Protocol\Transceiver;
 use D4ry\ImapClient\Tests\Unit\Support\FakeConnection;
+use D4ry\ImapClient\Tests\Unit\Support\LoopbackServer;
+use D4ry\ImapClient\Tests\Unit\Support\TimeoutOnceConnection;
 use D4ry\ImapClient\ValueObject\NamespaceInfo;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\UsesClass;
 use PHPUnit\Framework\TestCase;
 use ReflectionClass;
+use ReflectionMethod;
 use ReflectionProperty;
 
 #[CoversClass(Mailbox::class)]
@@ -51,6 +62,12 @@ use ReflectionProperty;
 #[UsesClass(\D4ry\ImapClient\Protocol\Response\FetchResponseParser::class)]
 #[UsesClass(\D4ry\ImapClient\Protocol\Response\UntaggedResponse::class)]
 #[UsesClass(\D4ry\ImapClient\Protocol\TagGenerator::class)]
+#[UsesClass(LoginCredential::class)]
+#[UsesClass(\D4ry\ImapClient\Auth\Credential::class)]
+#[UsesClass(Config::class)]
+#[UsesClass(SocketConnection::class)]
+#[UsesClass(LoggingConnection::class)]
+#[UsesClass(\D4ry\ImapClient\Exception\TimeoutException::class)]
 final class MailboxTest extends TestCase
 {
     private function setCapabilities(Transceiver $transceiver, Capability ...$caps): void
@@ -59,7 +76,7 @@ final class MailboxTest extends TestCase
         $prop->setValue($transceiver, $caps);
     }
 
-    private function makeMailbox(FakeConnection $connection, Capability ...$caps): array
+    private function makeMailbox(\D4ry\ImapClient\Connection\Contract\ConnectionInterface $connection, Capability ...$caps): array
     {
         $transceiver = new Transceiver($connection);
         $this->setCapabilities($transceiver, Capability::Imap4rev1, ...$caps);
@@ -353,5 +370,277 @@ final class MailboxTest extends TestCase
 
         $this->expectException(ConnectionException::class);
         $mailbox->idle(fn() => false);
+    }
+
+    public function testIdleHandlesParsingEdgeCases(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            '+ idling',
+            '',                          // empty → continue at line 202
+            'noise without star prefix', // parseIdleEvent returns null → continue at 208 (and 229)
+            '* foo bar',                 // untagged that matches neither numeric nor OK/NO/BAD/BYE → 254
+            '* 5 FETCH (UID 7)',         // FETCH without (FLAGS ...) → parseFetchIdleEvent fallback at 270
+            '* BAD oh no',               // OK|NO|BAD|BYE branch heartbeat (also exercises 251)
+            '* 1 EXISTS',                // final stop event
+            'A0001 OK IDLE done',
+        );
+
+        [$mailbox] = $this->makeMailbox($connection, Capability::Idle);
+
+        $events = [];
+        $mailbox->idle(function (\D4ry\ImapClient\Idle\IdleEvent $event) use (&$events): bool {
+            $events[] = $event;
+
+            return !($event instanceof \D4ry\ImapClient\Idle\MessageReceivedEvent);
+        }, timeout: 5.0);
+
+        // Three heartbeats (* foo bar, * 5 FETCH..., * BAD oh no) plus the EXISTS.
+        self::assertCount(4, $events);
+        self::assertInstanceOf(\D4ry\ImapClient\Idle\IdleHeartbeatEvent::class, $events[0]);
+        self::assertInstanceOf(\D4ry\ImapClient\Idle\IdleHeartbeatEvent::class, $events[1]);
+        self::assertInstanceOf(\D4ry\ImapClient\Idle\IdleHeartbeatEvent::class, $events[2]);
+        self::assertInstanceOf(\D4ry\ImapClient\Idle\MessageReceivedEvent::class, $events[3]);
+    }
+
+    public function testIdleSwallowsTimeoutExceptionAndContinuesReading(): void
+    {
+        $inner = new FakeConnection();
+        $inner->queueLines(
+            '+ idling',
+            '* 1 EXISTS',
+            'A0001 OK IDLE done',
+        );
+        // Throw on the second readLine() — the first is consumed by the
+        // continuation handshake, the timeout then fires inside the loop.
+        $connection = new TimeoutOnceConnection($inner, throwOnCall: 2);
+
+        [$mailbox] = $this->makeMailbox($connection, Capability::Idle);
+
+        $received = [];
+        $mailbox->idle(function (\D4ry\ImapClient\Idle\IdleEvent $event) use (&$received): bool {
+            $received[] = $event;
+
+            return false;
+        }, timeout: 5.0);
+
+        self::assertCount(1, $received);
+        self::assertInstanceOf(\D4ry\ImapClient\Idle\MessageReceivedEvent::class, $received[0]);
+    }
+
+    public function testIdReturnsNullWhenResponseHasNoIdUntagged(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines('A0001 OK ID done');
+
+        [$mailbox] = $this->makeMailbox($connection, Capability::Id);
+
+        self::assertNull($mailbox->id());
+    }
+
+    public function testNamespaceReturnsEmptyInfoWhenResponseHasNoNamespaceUntagged(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines('A0001 OK NAMESPACE done');
+
+        [$mailbox] = $this->makeMailbox($connection, Capability::Namespace);
+
+        $ns = $mailbox->namespace();
+
+        self::assertEquals(new NamespaceInfo(), $ns);
+    }
+
+    public function testParseFolderListSkipsLoosePayloads(): void
+    {
+        $connection = new FakeConnection();
+        [$mailbox] = $this->makeMailbox($connection);
+
+        $untagged = [
+            new UntaggedResponse('LIST', 'not-an-array'),
+            new UntaggedResponse('LIST', ['attributes' => [], 'delimiter' => '/', 'name' => '']),
+        ];
+
+        $method = new ReflectionMethod(Mailbox::class, 'parseFolderList');
+        $result = $method->invoke($mailbox, $untagged);
+
+        self::assertSame([], $result);
+    }
+
+    public function testParseNamespaceResponseHandlesNonStringAndAllBuckets(): void
+    {
+        $connection = new FakeConnection();
+        [$mailbox] = $this->makeMailbox($connection);
+
+        $method = new ReflectionMethod(Mailbox::class, 'parseNamespaceResponse');
+
+        // Non-string data → empty NamespaceInfo (covers line 351).
+        $empty = $method->invoke($mailbox, 42);
+        self::assertEquals(new NamespaceInfo(), $empty);
+
+        // String with three tuples → personal, other, shared all populated
+        // (covers the elseif/else branches at 367–370).
+        $populated = $method->invoke(
+            $mailbox,
+            '(("" "/")) (("Other/" "/")) (("Shared/" "/"))',
+        );
+
+        self::assertSame([['prefix' => '', 'delimiter' => '/']], $populated->personal);
+        self::assertSame([['prefix' => 'Other/', 'delimiter' => '/']], $populated->other);
+        self::assertSame([['prefix' => 'Shared/', 'delimiter' => '/']], $populated->shared);
+    }
+
+    public function testConnectPlainHappyPathDrivesFullExtensionFlow(): void
+    {
+        if (!function_exists('pcntl_fork')) {
+            self::markTestSkipped('pcntl extension required');
+        }
+
+        $server = new LoopbackServer();
+        $server->start('plain');
+
+        $pid = $server->forkAccept(function ($peer): void {
+            // Helpers — read one CRLF-terminated line / write a line.
+            $readLine = static function ($peer): string {
+                $line = '';
+                while (($c = fread($peer, 1)) !== false && $c !== '') {
+                    $line .= $c;
+                    if (str_ends_with($line, "\r\n")) {
+                        return $line;
+                    }
+                }
+                return $line;
+            };
+            $writeLine = static function ($peer, string $line): void {
+                fwrite($peer, $line . "\r\n");
+                fflush($peer);
+            };
+
+            // 1) Greeting.
+            $writeLine($peer, '* OK ready');
+
+            // 2) LOGIN — first command from LoginCredential. Reply with a
+            //    response code carrying the capabilities so we don't need a
+            //    separate CAPABILITY round-trip.
+            $readLine($peer); // A0001 LOGIN ...
+            $writeLine($peer, '* CAPABILITY IMAP4rev1 ENABLE ID UTF8=ACCEPT IDLE');
+            $writeLine($peer, 'A0001 OK [CAPABILITY IMAP4rev1 ENABLE ID UTF8=ACCEPT IDLE] LOGIN done');
+
+            // 3) ENABLE CONDSTORE QRESYNC UTF8=ACCEPT
+            $readLine($peer);
+            $writeLine($peer, '* ENABLED CONDSTORE QRESYNC UTF8=ACCEPT');
+            $writeLine($peer, 'A0002 OK ENABLE done');
+
+            // 4) ID
+            $readLine($peer);
+            $writeLine($peer, '* ID ("name" "TestServer")');
+            $writeLine($peer, 'A0003 OK ID done');
+
+            // Hold the socket open briefly to avoid racing the client's last
+            // response read.
+            usleep(100_000);
+        });
+
+        $logPath = sys_get_temp_dir() . '/imap-connect-test-' . uniqid('', true) . '.log';
+
+        try {
+            $config = new Config(
+                host: $server->host(),
+                credential: new LoginCredential('user', 'pass'),
+                port: $server->port(),
+                encryption: Encryption::None,
+                timeout: 2.0,
+                enableCondstore: true,
+                enableQresync: true,
+                utf8Accept: true,
+                clientId: ['name' => 'TestClient'],
+                logPath: $logPath, // exercises the LoggingConnection wrap branch
+            );
+
+            $mailbox = Mailbox::connect($config);
+
+            self::assertInstanceOf(Mailbox::class, $mailbox);
+            self::assertFileExists($logPath);
+        } finally {
+            $server->reap($pid);
+            $server->stop();
+            @unlink($logPath);
+        }
+    }
+
+    public function testConnectStartTlsBranchUpgradesAndRefreshesCapabilities(): void
+    {
+        if (!function_exists('pcntl_fork')) {
+            self::markTestSkipped('pcntl extension required');
+        }
+
+        $server = new LoopbackServer();
+        $server->start('starttls');
+
+        $pid = $server->forkAccept(function ($peer): void {
+            $readLine = static function ($peer): string {
+                $line = '';
+                while (($c = fread($peer, 1)) !== false && $c !== '') {
+                    $line .= $c;
+                    if (str_ends_with($line, "\r\n")) {
+                        return $line;
+                    }
+                }
+                return $line;
+            };
+            $writeLine = static function ($peer, string $line): void {
+                fwrite($peer, $line . "\r\n");
+                fflush($peer);
+            };
+
+            // 1) Greeting (plain).
+            $writeLine($peer, '* OK ready');
+
+            // 2) STARTTLS, then crypto upgrade.
+            $readLine($peer); // A0001 STARTTLS
+            $writeLine($peer, 'A0001 OK begin TLS');
+
+            @stream_socket_enable_crypto(
+                $peer,
+                true,
+                STREAM_CRYPTO_METHOD_TLSv1_2_SERVER
+                | STREAM_CRYPTO_METHOD_TLSv1_3_SERVER
+                | STREAM_CRYPTO_METHOD_TLSv1_1_SERVER,
+            );
+
+            // 3) refreshCapabilities() → CAPABILITY (no extensions to enable,
+            //    no clientId — this exercises the "skip" branches of the
+            //    feature-flag if-blocks).
+            $readLine($peer); // A0002 CAPABILITY
+            $writeLine($peer, '* CAPABILITY IMAP4rev1');
+            $writeLine($peer, 'A0002 OK CAPABILITY done');
+
+            // 4) LOGIN.
+            $readLine($peer); // A0003 LOGIN ...
+            $writeLine($peer, 'A0003 OK LOGIN done');
+
+            usleep(100_000);
+        });
+
+        try {
+            $config = new Config(
+                host: $server->host(),
+                credential: new LoginCredential('user', 'pass'),
+                port: $server->port(),
+                encryption: Encryption::StartTls,
+                timeout: 5.0,
+                sslOptions: [
+                    'verify_peer' => false,
+                    'verify_peer_name' => false,
+                    'allow_self_signed' => true,
+                ],
+            );
+
+            $mailbox = Mailbox::connect($config);
+
+            self::assertInstanceOf(Mailbox::class, $mailbox);
+        } finally {
+            $server->reap($pid);
+            $server->stop();
+        }
     }
 }

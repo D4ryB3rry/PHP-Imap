@@ -12,6 +12,9 @@ use D4ry\ImapClient\Enum\SpecialUse;
 use D4ry\ImapClient\Exception\ImapException;
 use D4ry\ImapClient\Folder;
 use D4ry\ImapClient\Message;
+use D4ry\ImapClient\Protocol\Response\Response;
+use D4ry\ImapClient\Protocol\Response\ResponseStatus;
+use D4ry\ImapClient\Protocol\Response\UntaggedResponse;
 use D4ry\ImapClient\Protocol\Transceiver;
 use D4ry\ImapClient\Search\Search;
 use D4ry\ImapClient\Search\SearchResult;
@@ -20,8 +23,10 @@ use D4ry\ImapClient\ValueObject\MailboxPath;
 use D4ry\ImapClient\ValueObject\MailboxStatus;
 use D4ry\ImapClient\ValueObject\Uid;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\UsesClass;
 use PHPUnit\Framework\TestCase;
+use ReflectionMethod;
 use ReflectionProperty;
 
 #[CoversClass(Folder::class)]
@@ -47,6 +52,8 @@ use ReflectionProperty;
 #[UsesClass(\D4ry\ImapClient\ValueObject\SequenceNumber::class)]
 #[UsesClass(\D4ry\ImapClient\Mime\HeaderDecoder::class)]
 #[UsesClass(\D4ry\ImapClient\Support\ImapDateFormatter::class)]
+#[UsesClass(\D4ry\ImapClient\Exception\ParseException::class)]
+#[UsesClass(\D4ry\ImapClient\Exception\ImapException::class)]
 final class FolderTest extends TestCase
 {
     private function setCapabilities(Transceiver $transceiver, Capability ...$caps): void
@@ -436,6 +443,124 @@ final class FolderTest extends TestCase
         self::assertNull($uid);
         self::assertStringContainsString('(\Seen \Flagged)', $connection->writes[0]);
         self::assertStringContainsString('"01-Jan-2024', $connection->writes[0]);
+    }
+
+    public function testAppendReturnsNullWhenContinuationNotReceived(): void
+    {
+        $connection = new FakeConnection();
+        // Server skips the continuation entirely and replies with a tagged
+        // status. readResponseForTag() returns the tagged response so the
+        // continuation tag is 'A0001', not '+', forcing the late return null.
+        $connection->queueLines('A0001 NO append refused');
+
+        [$folder] = $this->makeFolder($connection);
+
+        $uid = $folder->append('X');
+
+        self::assertNull($uid);
+        self::assertCount(1, $connection->writes);
+    }
+
+    public function testFetchMessagesEarlyReturnsForEmptyUidList(): void
+    {
+        $connection = new FakeConnection();
+        [$folder] = $this->makeFolder($connection);
+
+        $method = new ReflectionMethod(Folder::class, 'fetchMessages');
+        $result = $method->invoke($folder, []);
+
+        self::assertSame([], $result);
+        self::assertSame([], $connection->writes, 'empty UID list must short-circuit before any I/O');
+    }
+
+    public function testFetchMessagesSkipsNonFetchAndUidlessUntaggedEntries(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            'A0001 OK SELECT done',
+            '* SEARCH 1',
+            'A0002 OK SEARCH done',
+            // First untagged is not a FETCH (covers the type !== FETCH continue).
+            '* OK Some informational line',
+            // Second untagged is a FETCH but carries no UID key (covers the
+            // !($uid instanceof Uid) continue).
+            '* 1 FETCH (FLAGS () INTERNALDATE "01-Jan-2024 12:00:00 +0000" RFC822.SIZE 1 ENVELOPE (NIL NIL NIL NIL NIL NIL NIL NIL NIL NIL))',
+            'A0003 OK FETCH done',
+        );
+
+        [$folder] = $this->makeFolder($connection);
+
+        $messages = $folder->messages();
+
+        self::assertSame(0, $messages->count());
+    }
+
+    public function testFetchMessagesFallsBackToNowOnUnparseableInternalDate(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            'A0001 OK SELECT done',
+            '* SEARCH 9',
+            'A0002 OK SEARCH done',
+            '* 1 FETCH (UID 9 FLAGS () INTERNALDATE "garbage" RFC822.SIZE 1 ENVELOPE (NIL NIL NIL NIL NIL NIL NIL NIL NIL NIL))',
+            'A0003 OK FETCH done',
+        );
+
+        [$folder] = $this->makeFolder($connection);
+
+        $messages = $folder->messages();
+
+        self::assertSame(1, $messages->count());
+        // The catch swallowed the ParseException and the date stayed at "now"
+        // (set just before the try). We only assert the message materialized.
+        self::assertSame(9, $messages[0]->uid()->value);
+    }
+
+    /**
+     * @return iterable<string, array{Flag, string}>
+     */
+    public static function flagSearchProvider(): iterable
+    {
+        yield 'answered' => [Flag::Answered, 'ANSWERED'];
+        yield 'flagged' => [Flag::Flagged, 'FLAGGED'];
+        yield 'deleted' => [Flag::Deleted, 'DELETED'];
+        yield 'draft' => [Flag::Draft, 'DRAFT'];
+        yield 'recent' => [Flag::Recent, 'RECENT'];
+    }
+
+    #[DataProvider('flagSearchProvider')]
+    public function testMessagesFlagCriteriaCoversAllArms(Flag $flag, string $expectedToken): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            'A0001 OK SELECT done',
+            '* SEARCH',
+            'A0002 OK SEARCH done',
+        );
+
+        [$folder] = $this->makeFolder($connection);
+
+        $folder->messages($flag)->count();
+
+        self::assertSame("A0002 UID SEARCH {$expectedToken}\r\n", $connection->writes[1]);
+    }
+
+    public function testParseFolderListSkipsLoosePayloads(): void
+    {
+        $connection = new FakeConnection();
+        [$folder] = $this->makeFolder($connection);
+
+        $untagged = [
+            // data is a string, not an array → continue (line 390 / first guard)
+            new UntaggedResponse('LIST', 'not-an-array'),
+            // rawName is empty → continue (line 399)
+            new UntaggedResponse('LIST', ['attributes' => [], 'delimiter' => '/', 'name' => '']),
+        ];
+
+        $method = new ReflectionMethod(Folder::class, 'parseFolderList');
+        $result = $method->invoke($folder, $untagged);
+
+        self::assertSame([], $result);
     }
 
     public function testFetchMessagesIncludesObjectIdItemsWhenCapable(): void

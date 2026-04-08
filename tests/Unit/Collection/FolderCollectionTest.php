@@ -69,6 +69,26 @@ final class FolderCollectionTest extends TestCase
         self::assertSame($drafts, $collection->byPath('INBOX/Drafts'));
     }
 
+    public function testIteration(): void
+    {
+        $inbox = $this->folder('INBOX', 'INBOX');
+        $drafts = $this->folder('Drafts', 'INBOX/Drafts');
+        $sent = $this->folder('Sent', 'Sent', SpecialUse::Sent);
+        $collection = FolderCollection::fromArray([$inbox, $drafts, $sent]);
+
+        self::assertInstanceOf(\ArrayIterator::class, $collection->getIterator());
+
+        $iterated = [];
+        foreach ($collection as $key => $folder) {
+            $iterated[$key] = $folder;
+        }
+
+        self::assertSame([0, 1, 2], array_keys($iterated));
+        self::assertSame($inbox, $iterated[0]);
+        self::assertSame($drafts, $iterated[1]);
+        self::assertSame($sent, $iterated[2]);
+    }
+
     public function testOffsetExistsAndGet(): void
     {
         $inbox = $this->folder('INBOX', 'INBOX');
