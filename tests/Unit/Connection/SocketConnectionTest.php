@@ -79,6 +79,28 @@ final class SocketConnectionTest extends TestCase
         self::assertFalse($this->conn->isConnected());
     }
 
+    public function testSetReadTimeoutThrowsWhenNotConnected(): void
+    {
+        $this->expectException(ConnectionException::class);
+        $this->expectExceptionMessage('Not connected to IMAP server');
+
+        $this->conn->setReadTimeout(1.5);
+    }
+
+    public function testStreamBytesToThrowsWhenNotConnected(): void
+    {
+        $sink = fopen('php://memory', 'w+b');
+        self::assertNotFalse($sink);
+
+        try {
+            $this->expectException(ConnectionException::class);
+            $this->expectExceptionMessage('Not connected to IMAP server');
+            $this->conn->streamBytesTo($sink, 4);
+        } finally {
+            fclose($sink);
+        }
+    }
+
     // ---------------------------------------------------------------------
     // open()
     // ---------------------------------------------------------------------
@@ -414,6 +436,154 @@ final class SocketConnectionTest extends TestCase
         self::assertFalse($this->conn->isConnected());
 
         @fclose($peer);
+    }
+
+    public function testSetReadTimeoutAdjustsLiveStream(): void
+    {
+        $this->server->start('plain');
+        $this->conn->open('127.0.0.1', $this->server->port(), Encryption::None, 1.0);
+        $peer = $this->server->accept();
+
+        // Re-arm with a very short timeout — the next blocking read should
+        // trip the new (shorter) deadline rather than the original one.
+        $this->conn->setReadTimeout(0.2);
+
+        try {
+            $this->expectException(TimeoutException::class);
+            $this->conn->readLine();
+        } finally {
+            @fclose($peer);
+        }
+    }
+
+    public function testStreamBytesToRejectsNonResourceSink(): void
+    {
+        $this->server->start('plain');
+        $this->conn->open('127.0.0.1', $this->server->port(), Encryption::None, 1.0);
+        $peer = $this->server->accept();
+
+        try {
+            $this->expectException(ConnectionException::class);
+            $this->expectExceptionMessage('streamBytesTo() requires a valid stream resource');
+            $this->conn->streamBytesTo('not a resource', 4);
+        } finally {
+            @fclose($peer);
+        }
+    }
+
+    public function testStreamBytesToCopiesPayloadToSink(): void
+    {
+        if (!function_exists('pcntl_fork')) {
+            self::markTestSkipped('pcntl extension required');
+        }
+
+        $payload = str_repeat('A', 16384) . str_repeat('B', 5000);
+
+        $this->server->start('plain');
+
+        $pid = $this->server->forkAccept(function ($peer) use ($payload): void {
+            fwrite($peer, $payload);
+            fflush($peer);
+            usleep(200_000);
+        });
+
+        try {
+            $this->conn->open('127.0.0.1', $this->server->port(), Encryption::None, 5.0);
+
+            $sink = fopen('php://memory', 'w+b');
+            self::assertNotFalse($sink);
+
+            try {
+                $this->conn->streamBytesTo($sink, strlen($payload));
+                rewind($sink);
+                self::assertSame($payload, stream_get_contents($sink));
+            } finally {
+                fclose($sink);
+            }
+        } finally {
+            $this->server->reap($pid);
+        }
+    }
+
+    public function testStreamBytesToThrowsTimeoutWhenServerSilent(): void
+    {
+        $this->server->start('plain');
+        $this->conn->open('127.0.0.1', $this->server->port(), Encryption::None, 0.2);
+        $peer = $this->server->accept();
+
+        $sink = fopen('php://memory', 'w+b');
+        self::assertNotFalse($sink);
+
+        try {
+            $this->expectException(TimeoutException::class);
+            $this->expectExceptionMessage('Socket read timed out');
+            $this->conn->streamBytesTo($sink, 16);
+        } finally {
+            fclose($sink);
+            @fclose($peer);
+        }
+    }
+
+    public function testStreamBytesToThrowsConnectionExceptionWhenFreadFails(): void
+    {
+        // Same trick as readLine/readBytes: non-blocking with no data ready
+        // makes fread() return '' while feof() stays false.
+        $this->server->start('plain');
+        $this->conn->open('127.0.0.1', $this->server->port(), Encryption::None, 1.0);
+        $peer = $this->server->accept();
+
+        stream_set_blocking($this->getInternalStream(), false);
+
+        $sink = fopen('php://memory', 'w+b');
+        self::assertNotFalse($sink);
+
+        try {
+            $this->expectException(ConnectionException::class);
+            $this->expectExceptionMessage('Failed to read from socket');
+            $this->conn->streamBytesTo($sink, 16);
+        } finally {
+            fclose($sink);
+            @fclose($peer);
+        }
+    }
+
+    public function testStreamBytesToThrowsWhenSinkRejectsWrite(): void
+    {
+        if (!function_exists('pcntl_fork')) {
+            self::markTestSkipped('pcntl extension required');
+        }
+
+        $this->server->start('plain');
+
+        $pid = $this->server->forkAccept(function ($peer): void {
+            fwrite($peer, 'payload!');
+            fflush($peer);
+            usleep(200_000);
+        });
+
+        try {
+            $this->conn->open('127.0.0.1', $this->server->port(), Encryption::None, 5.0);
+
+            $sinkPath = tempnam(sys_get_temp_dir(), 'imap-sink-');
+            self::assertNotFalse($sinkPath);
+            // Read-only sink → fwrite returns 0, tripping the guard.
+            $sink = fopen($sinkPath, 'rb');
+            self::assertNotFalse($sink);
+
+            set_error_handler(static fn (): bool => true, E_WARNING);
+
+            try {
+                $this->expectException(ConnectionException::class);
+                $this->expectExceptionMessage('Failed to write to literal sink');
+                $this->conn->streamBytesTo($sink, 8);
+            } finally {
+                restore_error_handler();
+                fclose($sink);
+                @unlink($sinkPath);
+            }
+        } finally {
+            $this->server->reap($pid);
+        }
     }
 
     public function testIsTimedOutReturnsFalseWhenStreamIsNull(): void

@@ -49,6 +49,11 @@ final class TimeoutOnceConnection implements ConnectionInterface
         return $this->inner->readBytes($count);
     }
 
+    public function streamBytesTo($sink, int $count): void
+    {
+        $this->inner->streamBytesTo($sink, $count);
+    }
+
     public function write(string $data): void
     {
         $this->inner->write($data);

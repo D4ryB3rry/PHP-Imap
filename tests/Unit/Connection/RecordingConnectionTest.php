@@ -223,6 +223,81 @@ final class RecordingConnectionTest extends TestCase
         self::assertSame('boom', $events[1]['message']);
     }
 
+    public function testStreamBytesToRecordsAndWritesIntoSink(): void
+    {
+        $inner = new FakeConnection();
+        $inner->queueBytes('hello world');
+
+        $rec = new RecordingConnection($inner, $this->recordPath);
+
+        $sink = fopen('php://memory', 'w+b');
+        self::assertNotFalse($sink);
+
+        try {
+            $rec->streamBytesTo($sink, 11);
+
+            rewind($sink);
+            self::assertSame('hello world', stream_get_contents($sink));
+        } finally {
+            fclose($sink);
+        }
+        $rec->close();
+
+        $events = $this->readEvents();
+        $reads = array_values(array_filter($events, static fn (array $e): bool => $e['t'] === 'read_bytes'));
+        self::assertCount(1, $reads);
+        self::assertSame(11, $reads[0]['count']);
+        self::assertSame('hello world', base64_decode($reads[0]['data'], true));
+    }
+
+    public function testStreamBytesToErrorIsRecordedAndRethrown(): void
+    {
+        $rec = new RecordingConnection(new ThrowingConnection(), $this->recordPath);
+
+        $sink = fopen('php://memory', 'w+b');
+        self::assertNotFalse($sink);
+
+        try {
+            $rec->streamBytesTo($sink, 9);
+            self::fail('Expected ConnectionException');
+        } catch (ConnectionException) {
+        } finally {
+            fclose($sink);
+        }
+        $rec->close();
+
+        $events = $this->readEvents();
+        $err = $events[0];
+        self::assertSame('error', $err['t']);
+        self::assertSame('read_bytes', $err['op']);
+    }
+
+    public function testStreamBytesToThrowsWhenSinkRejectsWrite(): void
+    {
+        $inner = new FakeConnection();
+        $inner->queueBytes('payload');
+        $rec = new RecordingConnection($inner, $this->recordPath);
+
+        // A read-only stream causes fwrite() to return 0, tripping the
+        // "Failed to write to literal sink" guard.
+        $sinkPath = tempnam(sys_get_temp_dir(), 'imap-rec-sink-');
+        self::assertNotFalse($sinkPath);
+        $sink = fopen($sinkPath, 'rb');
+        self::assertNotFalse($sink);
+
+        set_error_handler(static fn (): bool => true, E_WARNING);
+
+        try {
+            $this->expectException(ConnectionException::class);
+            $this->expectExceptionMessage('Failed to write to literal sink');
+            $rec->streamBytesTo($sink, 7);
+        } finally {
+            restore_error_handler();
+            fclose($sink);
+            @unlink($sinkPath);
+        }
+    }
+
     public function testRecordSilentlyDropsInvalidUtf8(): void
     {
         $inner = new FakeConnection();

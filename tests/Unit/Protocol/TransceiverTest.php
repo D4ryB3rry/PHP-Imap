@@ -9,9 +9,11 @@ use D4ry\ImapClient\Exception\CapabilityException;
 use D4ry\ImapClient\Exception\CommandException;
 use D4ry\ImapClient\Protocol\Command\Command;
 use D4ry\ImapClient\Protocol\Response\Response;
+use D4ry\ImapClient\Protocol\Response\FetchResponseParser;
 use D4ry\ImapClient\Protocol\Response\ResponseParser;
 use D4ry\ImapClient\Protocol\Response\ResponseStatus;
 use D4ry\ImapClient\Protocol\Response\UntaggedResponse;
+use D4ry\ImapClient\Protocol\StreamingFetchState;
 use D4ry\ImapClient\Protocol\TagGenerator;
 use D4ry\ImapClient\Protocol\Transceiver;
 use D4ry\ImapClient\Tests\Unit\Support\FakeConnection;
@@ -23,7 +25,11 @@ use PHPUnit\Framework\TestCase;
 #[CoversClass(Transceiver::class)]
 #[UsesClass(Command::class)]
 #[UsesClass(Response::class)]
+#[UsesClass(FetchResponseParser::class)]
 #[UsesClass(ResponseParser::class)]
+#[UsesClass(StreamingFetchState::class)]
+#[UsesClass(\D4ry\ImapClient\ValueObject\Uid::class)]
+#[UsesClass(\D4ry\ImapClient\ValueObject\FlagSet::class)]
 #[UsesClass(UntaggedResponse::class)]
 #[UsesClass(TagGenerator::class)]
 #[UsesClass(Tag::class)]
@@ -356,6 +362,231 @@ final class TransceiverTest extends TestCase
 
         // Subsequent .next() should produce A0002, proving it's the same instance.
         self::assertSame('A0002', $transceiver->getTagGenerator()->next()->value);
+    }
+
+    public function testCapabilitiesGenerationAdvancesWhenCapabilityArrives(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            '* CAPABILITY IDLE',
+            'A0001 OK done',
+        );
+
+        $transceiver = new Transceiver($connection);
+        self::assertSame(0, $transceiver->capabilitiesGeneration());
+
+        $transceiver->capabilities();
+
+        self::assertSame(1, $transceiver->capabilitiesGeneration());
+    }
+
+    public function testCommandWithLiteralSinkRoutesLiteralIntoSink(): void
+    {
+        $payload = 'literal-bytes-into-sink';
+        $connection = new FakeConnection();
+        $connection->queueLines('* 1 FETCH (UID 42 BODY[2] {' . strlen($payload) . '}');
+        $connection->queueBytes($payload);
+        $connection->queueLines(
+            ')',
+            'A0001 OK FETCH done',
+        );
+
+        $sink = fopen('php://memory', 'w+b');
+        self::assertNotFalse($sink);
+
+        try {
+            $response = (new Transceiver($connection))->commandWithLiteralSink(
+                $sink,
+                'UID FETCH',
+                '42',
+                '(BODY.PEEK[2])',
+            );
+
+            rewind($sink);
+            self::assertSame($payload, stream_get_contents($sink));
+            self::assertTrue($response->isOk());
+            self::assertSame("A0001 UID FETCH 42 (BODY.PEEK[2])\r\n", $connection->writes[0]);
+        } finally {
+            fclose($sink);
+        }
+    }
+
+    public function testCommandWithLiteralSinkClearsSlotOnSuccessAndFailure(): void
+    {
+        // After commandWithLiteralSink the parser's literal sink slot must be
+        // cleared so a subsequent buffered command does not capture an
+        // unrelated literal into the previous sink.
+        $connection = new FakeConnection();
+        // First command: literal sink path.
+        $connection->queueLines('* 1 FETCH (UID 42 BODY[2] {3}');
+        $connection->queueBytes('xyz');
+        $connection->queueLines(
+            ')',
+            'A0001 OK done',
+        );
+        // Second buffered command also returns a literal — must NOT land in
+        // the previous sink.
+        $connection->queueLines('* 2 FETCH (UID 43 BODY[1] {5}');
+        $connection->queueBytes('hello');
+        $connection->queueLines(
+            ')',
+            'A0002 OK done',
+        );
+
+        $sink = fopen('php://memory', 'w+b');
+        self::assertNotFalse($sink);
+
+        try {
+            $transceiver = new Transceiver($connection);
+            $transceiver->commandWithLiteralSink($sink, 'UID FETCH', '42', '(BODY.PEEK[2])');
+            $second = $transceiver->command('UID FETCH', '43', '(BODY.PEEK[1])');
+
+            rewind($sink);
+            self::assertSame('xyz', stream_get_contents($sink));
+            // Second literal lands in the buffered FETCH data, not the sink.
+            self::assertSame('hello', $second->untagged[0]->data['BODY[1]']);
+        } finally {
+            fclose($sink);
+        }
+    }
+
+    public function testCommandWithLiteralSinkThrowsCommandExceptionOnNo(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines('A0001 NO denied');
+
+        $sink = fopen('php://memory', 'w+b');
+        self::assertNotFalse($sink);
+
+        try {
+            $this->expectException(CommandException::class);
+            (new Transceiver($connection))->commandWithLiteralSink(
+                $sink,
+                'UID FETCH',
+                '42',
+                '(BODY.PEEK[2])',
+            );
+        } finally {
+            fclose($sink);
+        }
+    }
+
+    public function testCommandStreamingFetchYieldsEachFetchUntagged(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            '* 1 FETCH (UID 7 FLAGS (\Seen))',
+            '* 2 FETCH (UID 8 FLAGS ())',
+            'A0001 OK FETCH done',
+        );
+
+        $transceiver = new Transceiver($connection);
+        $yielded = [];
+        foreach ($transceiver->commandStreamingFetch('UID FETCH', '1:*', '(UID FLAGS)') as $untagged) {
+            $yielded[] = $untagged;
+        }
+
+        self::assertCount(2, $yielded);
+        self::assertSame('FETCH', $yielded[0]->type);
+        self::assertSame('FETCH', $yielded[1]->type);
+        self::assertSame("A0001 UID FETCH 1:* (UID FLAGS)\r\n", $connection->writes[0]);
+    }
+
+    public function testCommandStreamingFetchThrowsCommandExceptionOnBad(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines('A0001 BAD invalid fetch');
+
+        $transceiver = new Transceiver($connection);
+
+        $this->expectException(CommandException::class);
+
+        foreach ($transceiver->commandStreamingFetch('UID FETCH', '1:*', '(UID)') as $_) {
+            // generator iteration triggers wire reads + completion check
+        }
+    }
+
+    public function testNestedCommandDuringStreamingDrainsAndQueues(): void
+    {
+        // Outer streaming FETCH yields the first response; the consumer then
+        // issues a nested command, which transparently drains the rest of the
+        // stream into the queue. Resuming iteration must yield the queued
+        // FETCH before going back to the wire.
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            '* 1 FETCH (UID 7 FLAGS (\Seen))',
+            '* 2 FETCH (UID 8 FLAGS ())',
+            'A0001 OK FETCH done',
+            'A0002 OK NOOP done',
+        );
+
+        $transceiver = new Transceiver($connection);
+        $yielded = [];
+        foreach ($transceiver->commandStreamingFetch('UID FETCH', '1:*', '(UID FLAGS)') as $untagged) {
+            $yielded[] = $untagged;
+            if (count($yielded) === 1) {
+                // Nested command drains the rest of the streaming FETCH.
+                $transceiver->command('NOOP');
+            }
+        }
+
+        self::assertCount(2, $yielded);
+        // NOOP arrives between the two FETCHes in the writes log because the
+        // generator was paused after yielding the first untagged.
+        self::assertSame("A0002 NOOP\r\n", $connection->writes[1]);
+    }
+
+    public function testDrainStreamingFetchIsIdempotentWhenNoStreamActive(): void
+    {
+        $connection = new FakeConnection();
+        $transceiver = new Transceiver($connection);
+
+        // No-op when nothing is in flight; must not throw or read from wire.
+        $transceiver->drainStreamingFetch();
+
+        self::assertSame([], $connection->writes);
+    }
+
+    public function testCommandStreamingFetchEarlyBreakStillProcessesUntaggedFromDrain(): void
+    {
+        // Consumer breaks after the first yield. The finally drain runs to
+        // completion (the wire still has more FETCHes plus a tagged OK with a
+        // CAPABILITY response code), so finalResponse is non-null and the
+        // post-drain processUntaggedResponses() branch must fire — verified by
+        // the cached capabilities being populated from the drained tagged code.
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            '* 1 FETCH (UID 7 FLAGS (\Seen))',
+            '* 2 FETCH (UID 8 FLAGS ())',
+            'A0001 OK [CAPABILITY IMAP4rev1 IDLE] FETCH done',
+        );
+
+        $transceiver = new Transceiver($connection);
+
+        foreach ($transceiver->commandStreamingFetch('UID FETCH', '1:*', '(UID FLAGS)') as $_) {
+            break;
+        }
+
+        self::assertTrue($transceiver->hasCapability(Capability::Idle));
+    }
+
+    public function testCommandStreamingFetchSwallowsDrainErrorOnEarlyBreak(): void
+    {
+        // Consumer breaks out of the foreach early — finally drains the rest
+        // of the stream. Make the drain hit an empty queue so readNextStreamingItem
+        // throws; the catch swallows it (connection considered toast).
+        $connection = new FakeConnection();
+        $connection->queueLines('* 1 FETCH (UID 7 FLAGS (\Seen))');
+        // No tagged response, no further FETCH lines → drain throws.
+
+        $transceiver = new Transceiver($connection);
+
+        foreach ($transceiver->commandStreamingFetch('UID FETCH', '1:*', '(UID FLAGS)') as $_) {
+            break; // early exit triggers the finally drain
+        }
+
+        // Reaching this assertion proves the drain failure was swallowed.
+        $this->addToAssertionCount(1);
     }
 
     public function testCapabilityIgnoresUnknownStrings(): void

@@ -114,6 +114,30 @@ class RecordingConnection implements ConnectionInterface
         }
     }
 
+    public function streamBytesTo($sink, int $count): void
+    {
+        // Recording mode falls back to buffering: we need to keep the literal
+        // bytes around to write them into the JSONL fixture. Performance and
+        // memory parity with the real socket is not a goal of recording mode —
+        // it exists for capturing reproducible test fixtures.
+        try {
+            $data = $this->inner->readBytes($count);
+            $this->record([
+                't' => 'read_bytes',
+                'count' => strlen($data),
+                'data' => base64_encode($data),
+            ]);
+        } catch (\Throwable $e) {
+            $this->record(['t' => 'error', 'op' => 'read_bytes', 'message' => $e->getMessage()]);
+            throw $e;
+        }
+
+        $written = @fwrite($sink, $data);
+        if ($written === false || $written !== strlen($data)) {
+            throw new ConnectionException('Failed to write to literal sink');
+        }
+    }
+
     public function write(string $data): void
     {
         $payload = $data;

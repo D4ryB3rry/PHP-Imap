@@ -134,7 +134,29 @@ class Folder implements FolderInterface
             // compact range expression.
             $set = $this->compressUidsToSet($searchResult->uids);
 
-            yield from $this->streamFetchMessages($set, useUid: true);
+            return yield from $this->streamFetchMessages($set, useUid: true);
+        });
+    }
+
+    /**
+     * Fetch a contiguous range of messages by sequence number (default) or
+     * by UID. Useful for "first N" / "last N" / paging benchmarks where the
+     * full mailbox FETCH from {@see messages()} would otherwise stream every
+     * message over the wire — even if the consumer breaks out of the loop
+     * early — bloating logs and wasting bandwidth.
+     */
+    public function messagesRange(int $from, int $to, bool $useUid = false, bool $withBodyStructure = false): MessageCollection
+    {
+        if ($from < 1 || $to < $from) {
+            throw new \InvalidArgumentException(
+                sprintf('Invalid message range: %d:%d', $from, $to)
+            );
+        }
+
+        return new MessageCollection(function () use ($from, $to, $useUid, $withBodyStructure): \Generator {
+            $this->select();
+
+            return yield from $this->streamFetchMessages($from . ':' . $to, useUid: $useUid, withBodyStructure: $withBodyStructure);
         });
     }
 
@@ -142,7 +164,12 @@ class Folder implements FolderInterface
     {
         $this->select();
 
-        $messages = $this->fetchMessages([$uid]);
+        // Eagerly fetch BODYSTRUCTURE in the same round-trip as the envelope.
+        // Callers that resolve a single message by UID overwhelmingly go on to
+        // touch attachments() / text() / html() — all of which need the
+        // structure. Bundling it here removes one server round-trip per
+        // message and is the dominant fix for benchmark 03.
+        $messages = $this->fetchMessages([$uid], withBodyStructure: true);
 
         if ($messages === []) {
             throw new Exception\ImapException(
@@ -267,6 +294,10 @@ class Folder implements FolderInterface
 
         $args[] = '{' . strlen($rawMessage) . '}';
 
+        // append() bypasses Transceiver::command() and writes directly to the
+        // socket, so it must drain any in-flight streaming FETCH itself.
+        $this->transceiver->drainStreamingFetch();
+
         $tag = $this->transceiver->getTagGenerator()->next();
         $line = $tag->value . ' APPEND ' . implode(' ', $args) . "\r\n";
         $this->transceiver->getConnection()->write($line);
@@ -309,7 +340,7 @@ class Folder implements FolderInterface
      * @param Uid[] $uids
      * @return MessageInterface[]
      */
-    private function fetchMessages(array $uids): array
+    private function fetchMessages(array $uids, bool $withBodyStructure = false): array
     {
         if ($uids === []) {
             return [];
@@ -317,7 +348,10 @@ class Folder implements FolderInterface
 
         $set = $this->compressUidsToSet($uids);
 
-        return iterator_to_array($this->streamFetchMessages($set, useUid: true), false);
+        return iterator_to_array(
+            $this->streamFetchMessages($set, useUid: true, withBodyStructure: $withBodyStructure),
+            false,
+        );
     }
 
     /**
@@ -333,10 +367,10 @@ class Folder implements FolderInterface
      *
      * @return \Generator<int, MessageInterface>
      */
-    private function streamFetchMessages(string $sequenceSet, bool $useUid): \Generator
+    private function streamFetchMessages(string $sequenceSet, bool $useUid, bool $withBodyStructure = false): \Generator
     {
         $command = $useUid ? 'UID FETCH' : 'FETCH';
-        [$fetchItems, $wantObjectId, $baseItems] = $this->buildFetchItems();
+        [$fetchItems, $wantObjectId, $baseItems] = $this->buildFetchItems($withBodyStructure);
 
         try {
             foreach ($this->transceiver->commandStreamingFetch(
@@ -381,12 +415,16 @@ class Folder implements FolderInterface
     /**
      * @return array{0: string[], 1: bool, 2: string[]}
      */
-    private function buildFetchItems(): array
+    private function buildFetchItems(bool $withBodyStructure = false): array
     {
         $baseItems = ['UID', 'FLAGS', 'ENVELOPE', 'INTERNALDATE', 'RFC822.SIZE'];
 
         if ($this->transceiver->hasCapability(\D4ry\ImapClient\Enum\Capability::Condstore)) {
             $baseItems[] = 'MODSEQ';
+        }
+
+        if ($withBodyStructure) {
+            $baseItems[] = 'BODYSTRUCTURE';
         }
 
         $wantObjectId = $this->transceiver->hasCapability(\D4ry\ImapClient\Enum\Capability::ObjectId)
@@ -421,6 +459,11 @@ class Folder implements FolderInterface
             }
         }
 
+        $bodyStructure = $data['BODYSTRUCTURE'] ?? null;
+        if (!$bodyStructure instanceof \D4ry\ImapClient\ValueObject\BodyStructure) {
+            $bodyStructure = null;
+        }
+
         return new Message(
             transceiver: $this->transceiver,
             uid: $uid,
@@ -433,6 +476,7 @@ class Folder implements FolderInterface
             emailIdValue: $data['EMAILID'] ?? null,
             threadIdValue: $data['THREADID'] ?? null,
             modSeqValue: $data['MODSEQ'] ?? null,
+            bodyStructure: $bodyStructure,
         );
     }
 

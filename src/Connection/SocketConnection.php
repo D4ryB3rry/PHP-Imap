@@ -108,6 +108,37 @@ class SocketConnection implements ConnectionInterface
         return $data;
     }
 
+    public function streamBytesTo($sink, int $count): void
+    {
+        $this->assertConnected();
+
+        if (!is_resource($sink)) {
+            throw new ConnectionException('streamBytesTo() requires a valid stream resource');
+        }
+
+        $remaining = $count;
+        $chunkSize = 8192;
+
+        while ($remaining > 0) {
+            $chunk = @fread($this->stream, $remaining < $chunkSize ? $remaining : $chunkSize);
+
+            if ($chunk === false || $chunk === '') {
+                if ($this->isTimedOut()) {
+                    throw new TimeoutException('Socket read timed out');
+                }
+
+                throw new ConnectionException('Failed to read from socket');
+            }
+
+            $written = @fwrite($sink, $chunk);
+            if ($written === false || $written !== strlen($chunk)) {
+                throw new ConnectionException('Failed to write to literal sink');
+            }
+
+            $remaining -= strlen($chunk);
+        }
+    }
+
     public function write(string $data): void
     {
         $this->assertConnected();

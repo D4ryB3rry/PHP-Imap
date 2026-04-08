@@ -89,6 +89,17 @@ final class FolderCollectionTest extends TestCase
         self::assertSame($sent, $iterated[2]);
     }
 
+    public function testToArrayReturnsLoadedFolders(): void
+    {
+        $inbox = $this->folder('INBOX', 'INBOX');
+        $drafts = $this->folder('Drafts', 'INBOX/Drafts');
+        $collection = FolderCollection::fromArray([$inbox, $drafts]);
+
+        $array = $collection->toArray();
+
+        self::assertSame([$inbox, $drafts], $array);
+    }
+
     public function testOffsetExistsAndGet(): void
     {
         $inbox = $this->folder('INBOX', 'INBOX');

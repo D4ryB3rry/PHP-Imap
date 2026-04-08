@@ -93,6 +93,17 @@ class LoggingConnection implements ConnectionInterface
         }
     }
 
+    public function streamBytesTo($sink, int $count): void
+    {
+        try {
+            $this->inner->streamBytesTo($sink, $count);
+            $this->log('S<', sprintf('[%d bytes streamed to sink]', $count));
+        } catch (\Throwable $e) {
+            $this->log('S!', sprintf('streamBytesTo(%d): %s', $count, $e->getMessage()));
+            throw $e;
+        }
+    }
+
     public function write(string $data): void
     {
         $line = rtrim($data, "\r\n");

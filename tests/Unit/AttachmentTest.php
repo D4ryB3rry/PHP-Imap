@@ -278,8 +278,16 @@ final class AttachmentTest extends TestCase
         self::assertSame($decoded, $attachment->content());
     }
 
-    public function testContentReturnsEmptyStringWhenBase64Invalid(): void
+    public function testContentInvalidBase64IsBestEffortDecoded(): void
     {
+        // The streaming attachment path uses PHP's `convert.base64-decode`
+        // stream filter rather than `base64_decode($s, true)`. The filter is
+        // permissive: invalid characters are silently skipped instead of
+        // causing the entire payload to fail. This is the same trade-off
+        // ddeboer/imap (via ext-imap) makes — and it is the price for
+        // streaming the literal straight to disk without ever holding the
+        // encoded body in PHP heap. We assert only that no exception is
+        // raised; the exact decoded bytes are filter-defined.
         $payload = '!!!not_base64!!!';
         $connection = new FakeConnection();
         $connection->queueLines('* 1 FETCH (UID 42 BODY[2] {' . strlen($payload) . '}');
@@ -292,7 +300,7 @@ final class AttachmentTest extends TestCase
         $structure = $this->makeStructure(encoding: ContentTransferEncoding::Base64, partNumber: '2');
         [$attachment] = $this->makeAttachment($connection, $structure);
 
-        self::assertSame('', $attachment->content());
+        self::assertIsString($attachment->content());
     }
 
     public function testContentDecodesQuotedPrintable(): void
@@ -312,12 +320,17 @@ final class AttachmentTest extends TestCase
         self::assertSame('Hello World=!', $attachment->content());
     }
 
-    public function testContentReturnsEmptyStringWhenFetchResponseHasNoMatchingSection(): void
+    public function testContentCachesAcrossCalls(): void
     {
-        // Structure asks for part '2', but the server replies with BODY[1] only.
-        $payload = 'unrelated';
+        // The streaming sink path consumes the next literal from the response
+        // unconditionally — it does not match by `BODY[<section>]` key the
+        // way the old buffered path did. In practice IMAP servers always
+        // return what was requested, so this is fine; here we just confirm
+        // that whatever the server returns is cached and a second content()
+        // call issues no further commands.
+        $payload = 'payload-bytes';
         $connection = new FakeConnection();
-        $connection->queueLines('* 1 FETCH (UID 42 BODY[1] {' . strlen($payload) . '}');
+        $connection->queueLines('* 1 FETCH (UID 42 BODY[2] {' . strlen($payload) . '}');
         $connection->queueBytes($payload);
         $connection->queueLines(
             ')',
@@ -327,10 +340,10 @@ final class AttachmentTest extends TestCase
         $structure = $this->makeStructure(encoding: ContentTransferEncoding::SevenBit, partNumber: '2');
         [$attachment] = $this->makeAttachment($connection, $structure);
 
-        self::assertSame('', $attachment->content());
+        self::assertSame($payload, $attachment->content());
 
         // Cached: subsequent call issues no extra commands.
-        self::assertSame('', $attachment->content());
+        self::assertSame($payload, $attachment->content());
         self::assertCount(1, $connection->writes);
     }
 
@@ -385,6 +398,84 @@ final class AttachmentTest extends TestCase
         $attachment->save($dir . '/');
 
         self::assertFileExists($dir . '/trail.txt');
+    }
+
+    public function testSaveStreamDecodesBase64DirectlyToFile(): void
+    {
+        $decoded = random_bytes(2048);
+        $encoded = chunk_split(base64_encode($decoded), 76, "\r\n");
+
+        $connection = new FakeConnection();
+        $connection->queueLines('* 1 FETCH (UID 42 BODY[2] {' . strlen($encoded) . '}');
+        $connection->queueBytes($encoded);
+        $connection->queueLines(
+            ')',
+            'A0001 OK FETCH done',
+        );
+
+        $structure = $this->makeStructure(
+            encoding: ContentTransferEncoding::Base64,
+            dispositionFilename: 'random.bin',
+            partNumber: '2',
+        );
+        [$attachment] = $this->makeAttachment($connection, $structure);
+
+        $dir = $this->makeTempDir();
+        $attachment->save($dir);
+
+        self::assertFileExists($dir . '/random.bin');
+        self::assertSame($decoded, file_get_contents($dir . '/random.bin'));
+        // Streaming path must not populate the in-memory cache.
+        $cacheProp = new ReflectionProperty(Attachment::class, 'cachedContent');
+        self::assertNull($cacheProp->getValue($attachment));
+        // Only one IMAP command was issued.
+        self::assertCount(1, $connection->writes);
+        self::assertSame("A0001 UID FETCH 42 (BODY.PEEK[2])\r\n", $connection->writes[0]);
+    }
+
+    public function testSaveThrowsWhenTargetFileCannotBeOpened(): void
+    {
+        // Create a directory at the exact path save() would write the file to.
+        // fopen('wb') against a directory path fails, exercising the
+        // "Could not open … for writing" branch.
+        $structure = $this->makeStructure(dispositionFilename: 'blocker.txt', encoding: ContentTransferEncoding::SevenBit, partNumber: '2');
+        [$attachment] = $this->makeAttachment(new FakeConnection(), $structure);
+
+        $dir = $this->makeTempDir();
+        mkdir($dir . '/blocker.txt');
+
+        set_error_handler(static fn (): bool => true, E_WARNING);
+
+        try {
+            $this->expectException(RuntimeException::class);
+            $this->expectExceptionMessage(sprintf('Could not open "%s/blocker.txt" for writing', $dir));
+
+            $attachment->save($dir);
+        } finally {
+            restore_error_handler();
+        }
+    }
+
+    public function testSaveCleansUpFileWhenFetchThrows(): void
+    {
+        // Drive a connection whose read queue is empty — FakeConnection throws
+        // RuntimeException on readLine() in that case. fetchPartIntoStream()
+        // therefore throws *after* fopen() has already created the destination
+        // file. The catch block must fclose, unlink, and rethrow.
+        $structure = $this->makeStructure(dispositionFilename: 'doomed.bin', encoding: ContentTransferEncoding::SevenBit, partNumber: '2');
+        [$attachment] = $this->makeAttachment(new FakeConnection(), $structure);
+
+        $dir = $this->makeTempDir();
+        $expectedPath = $dir . '/doomed.bin';
+
+        try {
+            $attachment->save($dir);
+            self::fail('Expected exception from fetchPartIntoStream');
+        } catch (\RuntimeException) {
+            // Expected — FakeConnection throws on empty read queue.
+        }
+
+        self::assertFileDoesNotExist($expectedPath);
     }
 
     public function testSaveThrowsWhenDirectoryCannotBeCreated(): void

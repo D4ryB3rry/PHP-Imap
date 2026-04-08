@@ -282,6 +282,56 @@ final class LoggingConnectionTest extends TestCase
         self::assertStringContainsString('C: A0001 LOGIN "alice" "hunter2"', $contents);
     }
 
+    public function testSetReadTimeoutLogsAndDelegates(): void
+    {
+        $inner = new FakeConnection();
+        $logging = new LoggingConnection($inner, $this->logPath);
+
+        $logging->setReadTimeout(2.5);
+
+        self::assertSame(2.5, $inner->lastReadTimeout);
+        self::assertStringContainsString('TMO readTimeout=2.5', $this->readLog());
+    }
+
+    public function testStreamBytesToDelegatesAndLogsByteCount(): void
+    {
+        $inner = new FakeConnection();
+        $inner->queueBytes('payload');
+        $logging = new LoggingConnection($inner, $this->logPath);
+
+        $sink = fopen('php://memory', 'w+b');
+        self::assertNotFalse($sink);
+
+        try {
+            $logging->streamBytesTo($sink, 7);
+
+            rewind($sink);
+            self::assertSame('payload', stream_get_contents($sink));
+        } finally {
+            fclose($sink);
+        }
+
+        self::assertStringContainsString('S< [7 bytes streamed to sink]', $this->readLog());
+    }
+
+    public function testStreamBytesToLogsErrorAndRethrows(): void
+    {
+        $logging = new LoggingConnection(new ThrowingConnection(), $this->logPath);
+
+        $sink = fopen('php://memory', 'w+b');
+        self::assertNotFalse($sink);
+
+        try {
+            $logging->streamBytesTo($sink, 9);
+            self::fail('Expected ConnectionException');
+        } catch (ConnectionException) {
+        } finally {
+            fclose($sink);
+        }
+
+        self::assertStringContainsString('S! streamBytesTo(9): boom', $this->readLog());
+    }
+
     public function testIsConnectedDelegates(): void
     {
         $inner = new FakeConnection();

@@ -45,23 +45,26 @@ class Attachment implements AttachmentInterface
 
         $this->ensureSelected();
 
-        $section = $this->structure->partNumber;
-        $response = $this->transceiver->command(
-            'UID FETCH',
-            (string) $this->messageUid->value,
-            sprintf('(BODY.PEEK[%s])', $section),
-        );
+        // Route through the same streaming-sink path as save() so the encoded
+        // body never materializes as a PHP string mid-fetch — the php://temp
+        // buffer holds only the *decoded* bytes that are about to become the
+        // return value anyway.
+        $sink = fopen('php://temp', 'w+b');
+        // @codeCoverageIgnoreStart
+        if ($sink === false) {
+            throw new \RuntimeException('Could not open php://temp for attachment content');
+        }
+        // @codeCoverageIgnoreEnd
 
-        $data = '';
-        foreach ($response->untagged as $untagged) {
-            if ($untagged->type === 'FETCH' && is_array($untagged->data)) {
-                $key = 'BODY[' . $section . ']';
-                $data = $untagged->data[$key] ?? '';
-                break;
-            }
+        try {
+            $this->fetchPartIntoStream($sink);
+            rewind($sink);
+            $decoded = stream_get_contents($sink);
+        } finally {
+            fclose($sink);
         }
 
-        $this->cachedContent = $this->decodeContent($data);
+        $this->cachedContent = $decoded === false ? '' : $decoded;
 
         return $this->cachedContent;
     }
@@ -86,7 +89,80 @@ class Attachment implements AttachmentInterface
             throw new \RuntimeException(sprintf('Directory "%s" was not created', $directoryPath));
         }
 
-        file_put_contents($path, $this->content());
+        // If we already have the decoded payload from a prior content() call,
+        // just dump it. The interesting path is the cold one below.
+        if ($this->cachedContent !== null) {
+            file_put_contents($path, $this->cachedContent);
+            return;
+        }
+
+        $this->ensureSelected();
+
+        $fp = fopen($path, 'wb');
+        if ($fp === false) {
+            throw new \RuntimeException(sprintf('Could not open "%s" for writing', $path));
+        }
+
+        try {
+            $this->fetchPartIntoStream($fp);
+        } catch (\Throwable $e) {
+            fclose($fp);
+            @unlink($path);
+            throw $e;
+        }
+
+        fclose($fp);
+    }
+
+    /**
+     * Stream the encoded part body straight from the IMAP socket into $sink,
+     * applying the appropriate decoding stream filter so the decoded bytes
+     * land in $sink without the encoded payload ever being materialized as a
+     * PHP string. This is the memory-bounded path used by save() and the
+     * php://temp-backed path inside content().
+     *
+     * @param resource $sink writable stream resource
+     */
+    private function fetchPartIntoStream($sink): void
+    {
+        $section = $this->structure->partNumber;
+
+        // Attach a decoding filter for the duration of the fetch. The filter
+        // sits in front of the sink, so socket → filter → sink runs entirely
+        // in chunks: 8 KiB read from the wire is fed straight to the filter,
+        // which writes the decoded bytes to the sink and returns. Peak heap
+        // for the literal stays at chunk-size, not literal-size.
+        $filterName = match ($this->structure->encoding) {
+            ContentTransferEncoding::Base64 => 'convert.base64-decode',
+            ContentTransferEncoding::QuotedPrintable => 'convert.quoted-printable-decode',
+            default => null,
+        };
+
+        $filter = null;
+        if ($filterName !== null) {
+            // line-length=0 disables PHP's automatic line-wrapping in the
+            // base64 filter for write mode, which is irrelevant here but also
+            // suppresses some whitespace-handling quirks on older builds.
+            $filter = @stream_filter_append($sink, $filterName, STREAM_FILTER_WRITE, ['line-length' => 0]);
+            // @codeCoverageIgnoreStart
+            if ($filter === false) {
+                throw new \RuntimeException(sprintf('Could not append "%s" filter to sink', $filterName));
+            }
+            // @codeCoverageIgnoreEnd
+        }
+
+        try {
+            $this->transceiver->commandWithLiteralSink(
+                $sink,
+                'UID FETCH',
+                (string) $this->messageUid->value,
+                sprintf('(BODY.PEEK[%s])', $section),
+            );
+        } finally {
+            if ($filter !== null) {
+                @stream_filter_remove($filter);
+            }
+        }
     }
 
     public function encoding(): ?ContentTransferEncoding
@@ -97,15 +173,6 @@ class Attachment implements AttachmentInterface
     public function bodyStructure(): BodyStructure
     {
         return $this->structure;
-    }
-
-    private function decodeContent(string $raw): string
-    {
-        return match ($this->structure->encoding) {
-            ContentTransferEncoding::Base64 => base64_decode(str_replace(["\r", "\n"], '', $raw), true) ?: '',
-            ContentTransferEncoding::QuotedPrintable => quoted_printable_decode($raw),
-            default => $raw,
-        };
     }
 
     private function ensureSelected(): void

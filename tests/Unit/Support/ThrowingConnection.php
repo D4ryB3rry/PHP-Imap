@@ -40,6 +40,11 @@ final class ThrowingConnection implements ConnectionInterface
         throw $this->error;
     }
 
+    public function streamBytesTo($sink, int $count): void
+    {
+        throw $this->error;
+    }
+
     public function write(string $data): void
     {
         throw $this->error;

@@ -45,6 +45,7 @@ use ReflectionProperty;
 #[UsesClass(\D4ry\ImapClient\Protocol\Response\ResponseParser::class)]
 #[UsesClass(\D4ry\ImapClient\Protocol\Response\FetchResponseParser::class)]
 #[UsesClass(\D4ry\ImapClient\Protocol\Response\UntaggedResponse::class)]
+#[UsesClass(\D4ry\ImapClient\Protocol\StreamingFetchState::class)]
 #[UsesClass(\D4ry\ImapClient\Protocol\TagGenerator::class)]
 #[UsesClass(\D4ry\ImapClient\ValueObject\Tag::class)]
 #[UsesClass(\D4ry\ImapClient\ValueObject\Envelope::class)]
@@ -55,6 +56,7 @@ use ReflectionProperty;
 #[UsesClass(\D4ry\ImapClient\Exception\ParseException::class)]
 #[UsesClass(\D4ry\ImapClient\Exception\ImapException::class)]
 #[UsesClass(\D4ry\ImapClient\Exception\CommandException::class)]
+#[UsesClass(\D4ry\ImapClient\ValueObject\BodyStructure::class)]
 final class FolderTest extends TestCase
 {
     private function setCapabilities(Transceiver $transceiver, Capability ...$caps): void
@@ -390,6 +392,85 @@ final class FolderTest extends TestCase
         self::assertStringContainsString('UID FETCH 1:3,7,9:10', $connection->writes[2]);
     }
 
+    public function testNestedCommandInsideStreamingFetchDoesNotDeadlock(): void
+    {
+        // Regression: previously, calling $msg->bodyStructure() (or any other
+        // command-issuing method) on a message yielded by messagesRange()
+        // would let the inner command consume the outer FETCH's remaining
+        // untagged + tagged responses. The outer streaming generator then
+        // blocked on a socket read for data that would never arrive.
+        //
+        // Worst-case scenario: trigger the nested command on the *first*
+        // yielded message — this forces the drain path to buffer the entire
+        // remainder of the outer FETCH before the inner command goes out.
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            '* 1 FETCH (UID 1 FLAGS () INTERNALDATE "01-Jan-2024 12:00:00 +0000" RFC822.SIZE 1 ENVELOPE (NIL NIL NIL NIL NIL NIL NIL NIL NIL NIL))',
+            '* 2 FETCH (UID 2 FLAGS () INTERNALDATE "01-Jan-2024 12:00:00 +0000" RFC822.SIZE 1 ENVELOPE (NIL NIL NIL NIL NIL NIL NIL NIL NIL NIL))',
+            '* 3 FETCH (UID 3 FLAGS () INTERNALDATE "01-Jan-2024 12:00:00 +0000" RFC822.SIZE 1 ENVELOPE (NIL NIL NIL NIL NIL NIL NIL NIL NIL NIL))',
+            'A0001 OK FETCH done',
+            // Nested BODYSTRUCTURE fetch triggered from inside the foreach.
+            '* 1 FETCH (UID 1 BODYSTRUCTURE ("TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "7BIT" 12 1 NIL NIL))',
+            'A0002 OK FETCH done',
+        );
+
+        [$folder, $transceiver] = $this->makeFolder($connection);
+        // Pre-mark INBOX selected so messagesRange()->select() is a no-op
+        // and the test only has to script the FETCH responses.
+        $transceiver->selectedMailbox = 'INBOX';
+
+        $iterated = [];
+        $structureType = null;
+        foreach ($folder->messagesRange(1, 3) as $msg) {
+            $iterated[] = $msg->uid()->value;
+            // Trigger the nested command on the FIRST yielded message.
+            if ($structureType === null) {
+                $structureType = $msg->bodyStructure()->type;
+            }
+        }
+
+        self::assertSame([1, 2, 3], $iterated);
+        self::assertSame('TEXT', $structureType);
+        // The nested UID FETCH must have actually been issued on the wire,
+        // proving the drain path didn't accidentally swallow it.
+        self::assertSame("A0001 FETCH 1:3 (UID FLAGS ENVELOPE INTERNALDATE RFC822.SIZE)\r\n", $connection->writes[0]);
+        self::assertSame("A0002 UID FETCH 1 (BODYSTRUCTURE)\r\n", $connection->writes[1]);
+    }
+
+    public function testEarlyBreakInsideStreamingFetchLeavesTransceiverClean(): void
+    {
+        // If a consumer breaks out of the foreach mid-stream, the rest of the
+        // outer FETCH must still be drained so the next command starts on a
+        // clean socket — otherwise the next command's reader would parse the
+        // leftover untagged FETCH responses as if they belonged to it.
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            '* 1 FETCH (UID 1 FLAGS () INTERNALDATE "01-Jan-2024 12:00:00 +0000" RFC822.SIZE 1 ENVELOPE (NIL NIL NIL NIL NIL NIL NIL NIL NIL NIL))',
+            '* 2 FETCH (UID 2 FLAGS () INTERNALDATE "01-Jan-2024 12:00:00 +0000" RFC822.SIZE 1 ENVELOPE (NIL NIL NIL NIL NIL NIL NIL NIL NIL NIL))',
+            '* 3 FETCH (UID 3 FLAGS () INTERNALDATE "01-Jan-2024 12:00:00 +0000" RFC822.SIZE 1 ENVELOPE (NIL NIL NIL NIL NIL NIL NIL NIL NIL NIL))',
+            'A0001 OK FETCH done',
+            // Follow-up command after the broken loop — must succeed.
+            'A0002 OK NOOP done',
+        );
+
+        [$folder, $transceiver] = $this->makeFolder($connection);
+        $transceiver->selectedMailbox = 'INBOX';
+
+        $iterated = [];
+        /** @noinspection LoopWhichDoesNotLoopInspection */
+        foreach ($folder->messagesRange(1, 3) as $msg) {
+            $iterated[] = $msg->uid()->value;
+            break; // abandoned mid-stream
+        }
+
+        self::assertSame([1], $iterated);
+
+        // Issuing a follow-up command should not blow up — drain has happened.
+        $response = $transceiver->command('NOOP');
+        self::assertSame(ResponseStatus::Ok, $response->status);
+        self::assertSame("A0002 NOOP\r\n", $connection->writes[1]);
+    }
+
     /**
      * @return iterable<string, array{Uid[], string}>
      */
@@ -703,5 +784,25 @@ final class FolderTest extends TestCase
 
         $this->expectException(\D4ry\ImapClient\Exception\CommandException::class);
         $folder->messages()->count();
+    }
+
+    public function testMessagesRangeRejectsZeroOrigin(): void
+    {
+        [$folder] = $this->makeFolder(new FakeConnection());
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Invalid message range: 0:5');
+
+        $folder->messagesRange(0, 5);
+    }
+
+    public function testMessagesRangeRejectsInvertedRange(): void
+    {
+        [$folder] = $this->makeFolder(new FakeConnection());
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Invalid message range: 5:3');
+
+        $folder->messagesRange(5, 3);
     }
 }

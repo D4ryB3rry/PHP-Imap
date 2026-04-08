@@ -9,7 +9,9 @@ use D4ry\ImapClient\Contract\AttachmentInterface;
 use D4ry\ImapClient\Contract\FolderInterface;
 use D4ry\ImapClient\Contract\MessageInterface;
 use D4ry\ImapClient\Enum\Capability;
+use D4ry\ImapClient\Enum\ContentTransferEncoding;
 use D4ry\ImapClient\Enum\Flag;
+use D4ry\ImapClient\Mime\HeaderDecoder;
 use D4ry\ImapClient\Mime\MimeParser;
 use D4ry\ImapClient\Mime\ParsedMessage;
 use D4ry\ImapClient\Protocol\Command\CommandBuilder;
@@ -25,6 +27,10 @@ class Message implements MessageInterface
     private ?ParsedMessage $parsedMessage = null;
     private ?string $rawBodyCache = null;
     private ?BodyStructure $bodyStructureCache = null;
+    private ?string $textBodyCache = null;
+    private bool $textBodyResolved = false;
+    private ?string $htmlBodyCache = null;
+    private bool $htmlBodyResolved = false;
 
     public function __construct(
         private readonly Transceiver $transceiver,
@@ -38,7 +44,9 @@ class Message implements MessageInterface
         private readonly ?string $emailIdValue = null,
         private readonly ?string $threadIdValue = null,
         private readonly ?int $modSeqValue = null,
+        ?BodyStructure $bodyStructure = null,
     ) {
+        $this->bodyStructureCache = $bodyStructure;
     }
 
     public function uid(): Uid
@@ -73,19 +81,31 @@ class Message implements MessageInterface
 
     public function hasHtml(): bool
     {
-        $parsed = $this->getParsedMessage();
-
-        return $parsed->htmlBody !== null;
+        return $this->html() !== null;
     }
 
     public function html(): ?string
     {
-        return $this->getParsedMessage()->htmlBody;
+        if ($this->htmlBodyResolved) {
+            return $this->htmlBodyCache;
+        }
+
+        $this->htmlBodyCache = $this->fetchTextPart('html');
+        $this->htmlBodyResolved = true;
+
+        return $this->htmlBodyCache;
     }
 
     public function text(): ?string
     {
-        return $this->getParsedMessage()->textBody;
+        if ($this->textBodyResolved) {
+            return $this->textBodyCache;
+        }
+
+        $this->textBodyCache = $this->fetchTextPart('plain');
+        $this->textBodyResolved = true;
+
+        return $this->textBodyCache;
     }
 
     public function headers(): array
@@ -247,6 +267,67 @@ class Message implements MessageInterface
         return $this->modSeqValue;
     }
 
+    private function fetchTextPart(string $subtype): ?string
+    {
+        $structure = $this->bodyStructure();
+        $part = $this->findTextPart($structure, $subtype);
+        if ($part === null) {
+            return null;
+        }
+
+        $this->ensureSelected();
+
+        $section = $part->partNumber;
+        $response = $this->transceiver->command(
+            'UID FETCH',
+            (string) $this->uid->value,
+            sprintf('(BODY.PEEK[%s])', $section),
+        );
+
+        $raw = '';
+        $key = 'BODY[' . $section . ']';
+        foreach ($response->untagged as $untagged) {
+            if ($untagged->type === 'FETCH' && is_array($untagged->data) && isset($untagged->data[$key])) {
+                $raw = (string) $untagged->data[$key];
+                break;
+            }
+        }
+
+        $decoded = match ($part->encoding) {
+            ContentTransferEncoding::Base64 => base64_decode(str_replace(["\r", "\n"], '', $raw), true) ?: '',
+            ContentTransferEncoding::QuotedPrintable => quoted_printable_decode($raw),
+            default => $raw,
+        };
+
+        $charset = $part->charset() ?? 'UTF-8';
+
+        return HeaderDecoder::convertToUtf8($decoded, $charset);
+    }
+
+    private function findTextPart(BodyStructure $structure, string $subtype): ?BodyStructure
+    {
+        if (!$structure->isMultipart()) {
+            if (
+                strtolower($structure->type) === 'text'
+                && strtolower($structure->subtype) === $subtype
+                && !$structure->isAttachment()
+            ) {
+                return $structure;
+            }
+
+            return null;
+        }
+
+        foreach ($structure->parts as $part) {
+            $found = $this->findTextPart($part, $subtype);
+            if ($found !== null) {
+                return $found;
+            }
+        }
+
+        return null;
+    }
+
     private function getParsedMessage(): ParsedMessage
     {
         if ($this->parsedMessage !== null) {
@@ -266,21 +347,36 @@ class Message implements MessageInterface
     private function collectAttachments(BodyStructure $structure): array
     {
         $attachments = [];
+        $this->walkAttachments($structure, $attachments);
 
+        return $attachments;
+    }
+
+    /**
+     * Recursive walker that pushes Attachment objects into an accumulator
+     * passed by reference. Avoids the O(n²) `array_merge` in a loop pattern
+     * the previous recursive implementation used.
+     *
+     * @param AttachmentInterface[] $accumulator
+     */
+    private function walkAttachments(BodyStructure $structure, array &$accumulator): void
+    {
         if ($structure->isMultipart()) {
             foreach ($structure->parts as $part) {
-                $attachments = array_merge($attachments, $this->collectAttachments($part));
+                $this->walkAttachments($part, $accumulator);
             }
-        } elseif ($structure->isAttachment() || $structure->isInline()) {
-            $attachments[] = new Attachment(
+
+            return;
+        }
+
+        if ($structure->isAttachment() || $structure->isInline()) {
+            $accumulator[] = new Attachment(
                 $this->transceiver,
                 $this->uid,
                 $structure,
                 $this->folderPath,
             );
         }
-
-        return $attachments;
     }
 
     private function ensureSelected(): void

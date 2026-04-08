@@ -245,6 +245,55 @@ final class ReplayConnectionTest extends TestCase
         self::assertFalse($replay->isConnected());
     }
 
+    public function testStreamBytesToWritesIntoSinkFromRecording(): void
+    {
+        $payload = 'streamed-bytes';
+        $this->writeJsonl([
+            ['t' => 'read_bytes', 'count' => strlen($payload), 'data' => base64_encode($payload)],
+        ]);
+
+        $replay = new ReplayConnection($this->recordPath);
+
+        $sink = fopen('php://memory', 'w+b');
+        self::assertNotFalse($sink);
+
+        try {
+            $replay->streamBytesTo($sink, strlen($payload));
+
+            rewind($sink);
+            self::assertSame($payload, stream_get_contents($sink));
+        } finally {
+            fclose($sink);
+        }
+    }
+
+    public function testStreamBytesToThrowsWhenSinkRejectsWrite(): void
+    {
+        $payload = 'payload';
+        $this->writeJsonl([
+            ['t' => 'read_bytes', 'count' => strlen($payload), 'data' => base64_encode($payload)],
+        ]);
+
+        $replay = new ReplayConnection($this->recordPath);
+
+        $sinkPath = tempnam(sys_get_temp_dir(), 'imap-replay-sink-');
+        self::assertNotFalse($sinkPath);
+        $sink = fopen($sinkPath, 'rb');
+        self::assertNotFalse($sink);
+
+        set_error_handler(static fn (): bool => true, E_WARNING);
+
+        try {
+            $this->expectException(ConnectionException::class);
+            $this->expectExceptionMessage('Failed to write to literal sink');
+            $replay->streamBytesTo($sink, strlen($payload));
+        } finally {
+            restore_error_handler();
+            fclose($sink);
+            @unlink($sinkPath);
+        }
+    }
+
     public function testStringFieldRejectsNonString(): void
     {
         $this->writeJsonl([

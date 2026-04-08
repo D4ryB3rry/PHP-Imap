@@ -10,6 +10,7 @@ use D4ry\ImapClient\Exception\CapabilityException;
 use D4ry\ImapClient\Exception\CommandException;
 use D4ry\ImapClient\Protocol\Command\Command;
 use D4ry\ImapClient\Protocol\Contract\TransceiverInterface;
+use D4ry\ImapClient\Protocol\StreamingFetchState;
 use D4ry\ImapClient\Protocol\Response\Response;
 use D4ry\ImapClient\Protocol\Response\ResponseParser;
 use D4ry\ImapClient\Protocol\Response\ResponseStatus;
@@ -24,6 +25,14 @@ class Transceiver implements TransceiverInterface
     private array $cachedCapabilities = [];
 
     private int $capabilitiesGeneration = 0;
+
+    /**
+     * Set while a streaming FETCH is in flight. Any other socket activity
+     * (nested commands, direct connection writes) must drain this before
+     * issuing its own command, otherwise the streaming generator and the
+     * inner reader race for the same bytes and the outer FETCH deadlocks.
+     */
+    private ?StreamingFetchState $activeStreaming = null;
 
     /**
      * Set when the server advertises OBJECTID but rejects EMAILID/THREADID in
@@ -63,6 +72,8 @@ class Transceiver implements TransceiverInterface
 
     public function command(string $name, string ...$args): Response
     {
+        $this->drainStreamingFetch();
+
         $tag = $this->tagGenerator->next();
 
         $command = new Command($tag, $name, $args);
@@ -70,6 +81,52 @@ class Transceiver implements TransceiverInterface
         $this->connection->write($command->compile());
 
         $response = $this->parser->readResponse($tag->value);
+
+        $this->processUntaggedResponses($response);
+
+        if ($response->status === ResponseStatus::No || $response->status === ResponseStatus::Bad) {
+            throw new CommandException(
+                tag: $tag->value,
+                command: $name,
+                responseText: $response->text,
+                status: $response->status->value,
+            );
+        }
+
+        return $response;
+    }
+
+    /**
+     * Issue a command whose first response literal must be streamed straight
+     * into a writable resource instead of being buffered into a PHP string.
+     *
+     * Only the first `{N}` literal in the response is routed to the sink;
+     * any subsequent literals in the same response fall back to the normal
+     * buffered path. This is the dedicated low-RAM path used by
+     * {@see \D4ry\ImapClient\Attachment::save()} to fetch attachment bodies
+     * without ever holding the encoded payload in PHP heap.
+     *
+     * @param resource $sink any writable PHP stream resource
+     */
+    public function commandWithLiteralSink($sink, string $name, string ...$args): Response
+    {
+        $this->drainStreamingFetch();
+
+        $tag = $this->tagGenerator->next();
+        $command = new Command($tag, $name, $args);
+
+        $this->connection->write($command->compile());
+
+        $this->parser->setNextLiteralSink($sink);
+
+        try {
+            $response = $this->parser->readResponse($tag->value);
+        } finally {
+            // Clear in case the response arrived without ever containing a
+            // literal — otherwise the sink slot would leak into the next
+            // command and silently capture an unrelated literal.
+            $this->parser->setNextLiteralSink(null);
+        }
 
         $this->processUntaggedResponses($response);
 
@@ -96,34 +153,98 @@ class Transceiver implements TransceiverInterface
      * state tracking after the tagged response arrives, identical to the
      * behavior of command().
      *
+     * Consumers may safely issue nested IMAP commands on this Transceiver
+     * from inside the foreach (e.g. `$msg->html()` triggering a BODYSTRUCTURE
+     * fetch). Those nested commands transparently drain the rest of this
+     * stream into an in-memory queue first; the streaming generator then
+     * yields the queued responses on resume before reading from the socket
+     * again. The streaming benefit is preserved when the consumer does *not*
+     * trigger nested commands — the queue stays at most one element deep.
+     *
      * @return \Generator<int, UntaggedResponse, mixed, Response>
      */
     public function commandStreamingFetch(string $name, string ...$args): \Generator
     {
+        $this->drainStreamingFetch();
+
         $tag = $this->tagGenerator->next();
 
         $command = new Command($tag, $name, $args);
 
         $this->connection->write($command->compile());
 
-        $response = yield from $this->parser->readResponseStreamingFetch($tag->value);
+        $state = new StreamingFetchState($tag->value);
+        $this->activeStreaming = $state;
 
-        $this->processUntaggedResponses($response);
+        try {
+            while (true) {
+                // Hand consumers anything previously queued by a nested
+                // drainStreamingFetch() call before going back to the wire.
+                while ($state->fetchQueue !== []) {
+                    yield array_shift($state->fetchQueue);
+                }
 
-        if ($response->status === ResponseStatus::No || $response->status === ResponseStatus::Bad) {
-            throw new CommandException(
-                tag: $tag->value,
-                command: $name,
-                responseText: $response->text,
-                status: $response->status->value,
-            );
+                if ($state->completed) {
+                    break;
+                }
+
+                $this->parser->readNextStreamingItem($state);
+            }
+
+            $response = $state->finalResponse;
+
+            $this->processUntaggedResponses($response);
+
+            if ($response->status === ResponseStatus::No || $response->status === ResponseStatus::Bad) {
+                throw new CommandException(
+                    tag: $tag->value,
+                    command: $name,
+                    responseText: $response->text,
+                    status: $response->status->value,
+                );
+            }
+
+            return $response;
+        } finally {
+            // If the consumer broke out early or threw, drain the rest so the
+            // next command starts on a clean socket. Best-effort: if drain
+            // itself fails the connection is already toast.
+            if ($this->activeStreaming !== null && !$this->activeStreaming->completed) {
+                try {
+                    while (!$this->activeStreaming->completed) {
+                        $this->parser->readNextStreamingItem($this->activeStreaming);
+                    }
+                    if ($this->activeStreaming->finalResponse !== null) {
+                        $this->processUntaggedResponses($this->activeStreaming->finalResponse);
+                    }
+                } catch (\Throwable) {
+                    // swallowed: connection unrecoverable
+                }
+            }
+            $this->activeStreaming = null;
+        }
+    }
+
+    /**
+     * Drain any in-flight streaming FETCH so the socket is positioned at the
+     * start of a fresh response. Idempotent: safe to call when no streaming
+     * is active. Called automatically before any other write to the socket.
+     */
+    public function drainStreamingFetch(): void
+    {
+        if ($this->activeStreaming === null || $this->activeStreaming->completed) {
+            return;
         }
 
-        return $response;
+        while (!$this->activeStreaming->completed) {
+            $this->parser->readNextStreamingItem($this->activeStreaming);
+        }
     }
 
     public function commandRaw(string $rawLine): Response
     {
+        $this->drainStreamingFetch();
+
         $tag = $this->tagGenerator->next();
         $line = $tag->value . ' ' . $rawLine . "\r\n";
 
@@ -147,6 +268,8 @@ class Transceiver implements TransceiverInterface
 
     public function sendAuthenticateCommand(string $mechanism): Response
     {
+        $this->drainStreamingFetch();
+
         $tag = $this->tagGenerator->next();
         $command = new Command($tag, 'AUTHENTICATE', [$mechanism]);
 

@@ -6,12 +6,36 @@ namespace D4ry\ImapClient\Protocol\Response;
 
 use D4ry\ImapClient\Connection\Contract\ConnectionInterface;
 use D4ry\ImapClient\Exception\ProtocolException;
+use D4ry\ImapClient\Protocol\StreamingFetchState;
 
 class ResponseParser
 {
+    /**
+     * One-shot literal sink. When set, the next `{N}` literal encountered by
+     * {@see readFullLine()} is streamed straight from the socket into this
+     * resource instead of being buffered into a PHP string. The slot is
+     * cleared as soon as it is consumed so subsequent literals fall back to
+     * the normal buffered path.
+     *
+     * Used by {@see Transceiver::commandWithLiteralSink()} to fetch large
+     * IMAP literals (attachment bodies) without ever materializing them in
+     * PHP heap.
+     *
+     * @var resource|null
+     */
+    private $literalSink = null;
+
     public function __construct(
         private readonly ConnectionInterface $connection,
     ) {
+    }
+
+    /**
+     * @param resource|null $sink
+     */
+    public function setNextLiteralSink($sink): void
+    {
+        $this->literalSink = $sink;
     }
 
     public function readGreeting(): UntaggedResponse
@@ -69,53 +93,45 @@ class ResponseParser
     }
 
     /**
-     * Streaming variant of readResponse() that yields each untagged FETCH
-     * response as soon as it has been parsed, instead of buffering the entire
-     * response in memory before any consumer sees it.
+     * Reads exactly one protocol item from the socket and dispatches it into
+     * a {@see StreamingFetchState}. FETCH untagged responses go onto the
+     * fetch queue (for the streaming generator to drain), other untagged
+     * lines are buffered, and a tagged line matching the state's tag closes
+     * the stream.
      *
-     * Non-FETCH untagged lines are still buffered (they're rare and the
-     * Transceiver needs them for capability/state tracking).
-     *
-     * The Generator returns the final tagged Response object via its return
-     * value, so callers must consume the generator with `yield from` (or
-     * iterate it fully and call `getReturn()`).
-     *
-     * @return \Generator<int, UntaggedResponse, mixed, Response>
+     * Used by both the streaming generator (one item per pull) and by
+     * {@see Transceiver::drainStreamingFetch()} (loop until completed) so a
+     * nested command can finish reading the outer FETCH before issuing its
+     * own command on the wire.
      */
-    public function readResponseStreamingFetch(string $expectedTag): \Generator
+    public function readNextStreamingItem(StreamingFetchState $state): void
     {
-        $untagged = [];
+        $line = $this->readFullLine();
 
-        while (true) {
-            $line = $this->readFullLine();
+        if (str_starts_with($line, '* ')) {
+            $parsed = $this->parseUntaggedLine($line);
 
-            if (str_starts_with($line, '* ')) {
-                $parsed = $this->parseUntaggedLine($line);
-
-                if ($parsed->type === 'FETCH') {
-                    yield $parsed;
-                } else {
-                    $untagged[] = $parsed;
-                }
-
-                continue;
+            if ($parsed->type === 'FETCH') {
+                $state->fetchQueue[] = $parsed;
+            } else {
+                $state->otherUntagged[] = $parsed;
             }
 
-            if ($line === '+' || str_starts_with($line, '+ ')) {
-                return new Response(
-                    status: ResponseStatus::Ok,
-                    tag: '+',
-                    text: $line === '+' ? '' : trim(substr($line, 2)),
-                    untagged: $untagged,
-                );
-            }
-
-            if (str_starts_with($line, $expectedTag . ' ')) {
-                return $this->parseTaggedLine($line, $expectedTag, $untagged);
-            }
-
-            $untagged[] = new UntaggedResponse('UNKNOWN', null, $line);
+            return;
         }
+
+        if (str_starts_with($line, $state->tag . ' ')) {
+            $state->finalResponse = $this->parseTaggedLine($line, $state->tag, $state->otherUntagged);
+            // Untagged ownership has moved into finalResponse->untagged.
+            $state->otherUntagged = [];
+            $state->completed = true;
+
+            return;
+        }
+
+        // Continuations are not expected mid-FETCH; preserve as unknown so
+        // the surrounding code can still inspect it after the fact.
+        $state->otherUntagged[] = new UntaggedResponse('UNKNOWN', null, $line);
     }
 
     public function readContinuation(): string
@@ -140,11 +156,32 @@ class ResponseParser
 
         while (preg_match('/\{(\d+)\+?\}\s*$/', $line, $matches)) {
             $literalSize = (int) $matches[1];
-            $literalData = $this->connection->readBytes($literalSize);
 
-            // Preserve {N}\r\n<data> format so FetchResponseParser::readLiteral() can handle it
-            $parts[] = $line;
-            $parts[] = $literalData;
+            if ($this->literalSink !== null) {
+                // Sink mode: stream the literal straight from socket to the
+                // sink in 8 KiB chunks. We then rewrite the {N} framing in
+                // the line to {0} so FetchResponseParser parses an empty
+                // literal value for this section — the real bytes already
+                // live in the sink. This is the streaming path that lets
+                // Attachment::save() avoid holding the encoded body in PHP
+                // heap. One-shot: the slot is cleared after use so any
+                // subsequent literal in the same response (e.g. an unrelated
+                // FETCH untagged update) falls back to buffered reading.
+                $sink = $this->literalSink;
+                $this->literalSink = null;
+
+                $this->connection->streamBytesTo($sink, $literalSize);
+
+                $line = preg_replace('/\{\d+\+?\}(\s*)$/', '{0}$1', $line);
+                $parts[] = $line;
+                // No literal data appended — readLiteral() will substr 0 bytes.
+            } else {
+                $literalData = $this->connection->readBytes($literalSize);
+
+                // Preserve {N}\r\n<data> format so FetchResponseParser::readLiteral() can handle it
+                $parts[] = $line;
+                $parts[] = $literalData;
+            }
 
             $line = $this->connection->readLine();
         }

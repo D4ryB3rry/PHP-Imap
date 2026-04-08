@@ -140,6 +140,18 @@ class ReplayConnection implements ConnectionInterface
         return $data;
     }
 
+    public function streamBytesTo($sink, int $count): void
+    {
+        // Replay reads bytes from a JSONL file in memory anyway, so there is
+        // nothing to gain by chunking — just buffer-then-write.
+        $data = $this->readBytes($count);
+
+        $written = @fwrite($sink, $data);
+        if ($written === false || $written !== strlen($data)) {
+            throw new ConnectionException('Failed to write to literal sink');
+        }
+    }
+
     public function write(string $data): void
     {
         $event = $this->peek();

@@ -26,6 +26,8 @@ interface FolderInterface
 
     public function messages(Flag|SearchCriteriaInterface|null $criteria = null): MessageCollection;
 
+    public function messagesRange(int $from, int $to, bool $useUid = false, bool $withBodyStructure = false): MessageCollection;
+
     public function message(Uid $uid): MessageInterface;
 
     public function search(SearchCriteriaInterface $criteria): SearchResult;

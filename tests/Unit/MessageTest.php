@@ -273,8 +273,115 @@ final class MessageTest extends TestCase
         self::assertCount($writeCount, $connection->writes, 'bodyStructure() must cache the result');
     }
 
-    public function testHtmlAndTextAndHeadersFromMimeParser(): void
+    public function testTextFetchesOnlyTextPartUsingBodyStructure(): void
     {
+        $textPayload = 'This is the body.';
+        $connection = new FakeConnection();
+
+        // 1. text() → BODYSTRUCTURE for a single-part text/plain message.
+        $connection->queueLines(
+            '* 1 FETCH (UID 42 BODYSTRUCTURE ("TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "7BIT" 17 1 NIL NIL))',
+            'A0001 OK FETCH done',
+        );
+        // 2. BODY.PEEK[1] returns just the text part body.
+        $connection->queueLines('* 1 FETCH (UID 42 BODY[1] {' . strlen($textPayload) . '}');
+        $connection->queueBytes($textPayload);
+        $connection->queueLines(
+            ')',
+            'A0002 OK FETCH done',
+        );
+
+        [$message] = $this->makeMessage($connection);
+
+        self::assertSame($textPayload, $message->text());
+
+        // Exactly two commands: BODYSTRUCTURE then BODY.PEEK[1] — never a full BODY[] fetch.
+        self::assertCount(2, $connection->writes);
+        self::assertSame("A0001 UID FETCH 42 (BODYSTRUCTURE)\r\n", $connection->writes[0]);
+        self::assertSame("A0002 UID FETCH 42 (BODY.PEEK[1])\r\n", $connection->writes[1]);
+
+        // Cached: subsequent calls send no new commands.
+        self::assertSame($textPayload, $message->text());
+        self::assertCount(2, $connection->writes);
+    }
+
+    public function testHtmlReturnsNullForPlainTextMessageWithoutFetchingFullBody(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            '* 1 FETCH (UID 42 BODYSTRUCTURE ("TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "7BIT" 17 1 NIL NIL))',
+            'A0001 OK FETCH done',
+        );
+
+        [$message] = $this->makeMessage($connection);
+
+        self::assertFalse($message->hasHtml());
+        self::assertNull($message->html());
+        // Only the BODYSTRUCTURE fetch happened — no BODY[] download.
+        self::assertCount(1, $connection->writes);
+        self::assertSame("A0001 UID FETCH 42 (BODYSTRUCTURE)\r\n", $connection->writes[0]);
+    }
+
+    public function testTextFetchesCorrectPartFromMultipartMixed(): void
+    {
+        $textPayload = 'Plain body of an email with a big PDF attachment.';
+        $connection = new FakeConnection();
+
+        // multipart/mixed with text/plain (part 1) + application/pdf attachment (part 2).
+        $bodyStructure =
+            '(' .
+                '("TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "7BIT" 50 1 NIL NIL NIL)' .
+                '("APPLICATION" "PDF" ("NAME" "big.pdf") NIL NIL "BASE64" 5000000 NIL ' .
+                    '("ATTACHMENT" ("FILENAME" "big.pdf")) NIL NIL)' .
+                ' "MIXED" NIL NIL NIL' .
+            ')';
+
+        $connection->queueLines(
+            '* 1 FETCH (UID 42 BODYSTRUCTURE ' . $bodyStructure . ')',
+            'A0001 OK FETCH done',
+        );
+        $connection->queueLines('* 1 FETCH (UID 42 BODY[1] {' . strlen($textPayload) . '}');
+        $connection->queueBytes($textPayload);
+        $connection->queueLines(
+            ')',
+            'A0002 OK FETCH done',
+        );
+
+        [$message] = $this->makeMessage($connection);
+
+        self::assertSame($textPayload, $message->text());
+
+        // Critically: the attachment part (BODY[2], 5 MB) is never requested.
+        self::assertCount(2, $connection->writes);
+        self::assertSame("A0002 UID FETCH 42 (BODY.PEEK[1])\r\n", $connection->writes[1]);
+    }
+
+    public function testTextDecodesBase64TextPart(): void
+    {
+        $decoded = 'Hällo Wörld — base64 + UTF-8';
+        $encoded = base64_encode($decoded);
+
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            '* 1 FETCH (UID 42 BODYSTRUCTURE ("TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "BASE64" ' . strlen($encoded) . ' 1 NIL NIL))',
+            'A0001 OK FETCH done',
+        );
+        $connection->queueLines('* 1 FETCH (UID 42 BODY[1] {' . strlen($encoded) . '}');
+        $connection->queueBytes($encoded);
+        $connection->queueLines(
+            ')',
+            'A0002 OK FETCH done',
+        );
+
+        [$message] = $this->makeMessage($connection);
+
+        self::assertSame($decoded, $message->text());
+    }
+
+    public function testHeadersStillUseFullBodyFetch(): void
+    {
+        // headers()/header() continue to rely on rawBody() — verify the
+        // original BODY[] path is unchanged for that consumer.
         $connection = new FakeConnection();
         $body = "Subject: Hello world\r\nFrom: test@example.com\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\nThis is the body.";
         $connection->queueLines('* 1 FETCH (UID 42 BODY[] {' . strlen($body) . '}');
@@ -286,9 +393,6 @@ final class MessageTest extends TestCase
 
         [$message] = $this->makeMessage($connection);
 
-        self::assertFalse($message->hasHtml());
-        self::assertNull($message->html());
-        self::assertSame('This is the body.', trim($message->text() ?? ''));
         self::assertSame('Hello world', $message->header('subject'));
         self::assertArrayHasKey('Subject', $message->headers());
     }
@@ -320,7 +424,7 @@ final class MessageTest extends TestCase
             }
             // Clean up directory tree
             @rmdir(dirname($tmpFile));
-            @rmdir(dirname(dirname($tmpFile)));
+            @rmdir(dirname($tmpFile, 2));
             @rmdir($tmpDir);
         }
     }
@@ -394,6 +498,31 @@ final class MessageTest extends TestCase
             restore_error_handler();
             @unlink($blocker);
         }
+    }
+
+    public function testHtmlReturnsNullForMultipartWithoutHtmlPart(): void
+    {
+        // multipart/mixed with text/plain + application/pdf — no text/html.
+        // Exercises the post-loop `return null` in findTextPart() after the
+        // recursive walk visits every part without matching.
+        $bodyStructure =
+            '(' .
+                '("TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "7BIT" 12 1 NIL NIL NIL)' .
+                '("APPLICATION" "PDF" ("NAME" "doc.pdf") NIL NIL "BASE64" 1234 NIL ' .
+                    '("ATTACHMENT" ("FILENAME" "doc.pdf")) NIL NIL)' .
+                ' "MIXED" NIL NIL NIL' .
+            ')';
+
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            '* 1 FETCH (UID 42 BODYSTRUCTURE ' . $bodyStructure . ')',
+            'A0001 OK FETCH done',
+        );
+
+        [$message] = $this->makeMessage($connection);
+
+        self::assertNull($message->html());
+        self::assertFalse($message->hasHtml());
     }
 
     public function testAttachmentsWalksMultipartAndExtractsAttachmentPart(): void

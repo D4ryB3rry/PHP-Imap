@@ -76,6 +76,12 @@ final class FakeConnection implements ConnectionInterface
         return array_shift($this->byteQueue);
     }
 
+    public function streamBytesTo($sink, int $count): void
+    {
+        $data = $this->readBytes($count);
+        fwrite($sink, $data);
+    }
+
     public function write(string $data): void
     {
         $this->writes[] = $data;

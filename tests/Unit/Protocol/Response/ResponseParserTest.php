@@ -19,6 +19,9 @@ use PHPUnit\Framework\TestCase;
 #[UsesClass(Response::class)]
 #[UsesClass(UntaggedResponse::class)]
 #[UsesClass(FetchResponseParser::class)]
+#[UsesClass(\D4ry\ImapClient\Protocol\StreamingFetchState::class)]
+#[UsesClass(\D4ry\ImapClient\ValueObject\Uid::class)]
+#[UsesClass(\D4ry\ImapClient\ValueObject\FlagSet::class)]
 final class ResponseParserTest extends TestCase
 {
     private function makeParser(FakeConnection $connection): ResponseParser
@@ -585,6 +588,105 @@ final class ResponseParserTest extends TestCase
 
         self::assertSame('FLAGS', $response->untagged[0]->type);
         self::assertSame([], $response->untagged[0]->data);
+    }
+
+    public function testReadResponseFetchWithUnclosedParenReturnsSeqOnly(): void
+    {
+        // The literal-content branch ensures `(` is the first byte but the
+        // closing paren is missing — strrpos() returns false, so parseFetchData
+        // bails out and the result contains only the seq key.
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            '* 7 FETCH (UID 42 UNCLOSED',
+            'A0001 OK done',
+        );
+
+        $response = $this->makeParser($connection)->readResponse('A0001');
+        $fetch = $response->untagged[0];
+
+        self::assertSame('FETCH', $fetch->type);
+        self::assertSame(7, $fetch->data['seq']);
+        self::assertCount(1, $fetch->data);
+    }
+
+    public function testSetNextLiteralSinkRoutesLiteralIntoSink(): void
+    {
+        $payload = 'literal-sink-bytes';
+        $connection = new FakeConnection();
+        $connection->queueLines('* 1 FETCH (UID 42 BODY[2] {' . strlen($payload) . '}');
+        $connection->queueBytes($payload);
+        $connection->queueLines(
+            ')',
+            'A0001 OK FETCH done',
+        );
+
+        $sink = fopen('php://memory', 'w+b');
+        self::assertNotFalse($sink);
+
+        try {
+            $parser = $this->makeParser($connection);
+            $parser->setNextLiteralSink($sink);
+
+            $response = $parser->readResponse('A0001');
+
+            rewind($sink);
+            self::assertSame($payload, stream_get_contents($sink));
+            // After the literal is consumed the FETCH parser sees an empty
+            // body for that section because the framing was rewritten to {0}.
+            self::assertSame('', $response->untagged[0]->data['BODY[2]'] ?? null);
+        } finally {
+            fclose($sink);
+        }
+    }
+
+    public function testReadNextStreamingItemQueuesFetchAndCompletesOnTaggedLine(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            '* CAPABILITY IMAP4rev1',
+            '* 1 FETCH (UID 42 FLAGS (\Seen))',
+            '* 2 FETCH (UID 43 FLAGS ())',
+            'A0001 OK FETCH done',
+        );
+
+        $parser = $this->makeParser($connection);
+        $state = new \D4ry\ImapClient\Protocol\StreamingFetchState('A0001');
+
+        // First item: non-FETCH untagged → otherUntagged.
+        $parser->readNextStreamingItem($state);
+        self::assertCount(1, $state->otherUntagged);
+        self::assertSame('CAPABILITY', $state->otherUntagged[0]->type);
+        self::assertFalse($state->completed);
+
+        // Two FETCH items → fetchQueue.
+        $parser->readNextStreamingItem($state);
+        $parser->readNextStreamingItem($state);
+        self::assertCount(2, $state->fetchQueue);
+
+        // Tagged completion line.
+        $parser->readNextStreamingItem($state);
+        self::assertTrue($state->completed);
+        self::assertNotNull($state->finalResponse);
+        self::assertSame([], $state->otherUntagged);
+        self::assertCount(1, $state->finalResponse->untagged);
+    }
+
+    public function testReadNextStreamingItemUnknownLineGoesToOtherUntagged(): void
+    {
+        $connection = new FakeConnection();
+        // A continuation in the middle of a streaming FETCH is unexpected;
+        // the parser must preserve it as UNKNOWN instead of crashing.
+        $connection->queueLines(
+            '+ go ahead',
+            'A0001 OK done',
+        );
+
+        $parser = $this->makeParser($connection);
+        $state = new \D4ry\ImapClient\Protocol\StreamingFetchState('A0001');
+
+        $parser->readNextStreamingItem($state);
+        self::assertCount(1, $state->otherUntagged);
+        self::assertSame('UNKNOWN', $state->otherUntagged[0]->type);
     }
 
     public function testReadResponseFetchWithEmptyParens(): void
