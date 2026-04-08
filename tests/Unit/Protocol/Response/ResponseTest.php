@@ -36,6 +36,15 @@ final class ResponseTest extends TestCase
         self::assertFalse($bad->isOk());
     }
 
+    public function testIsOkReturnsFalseForPreAuthAndBye(): void
+    {
+        $preAuth = new Response(ResponseStatus::PreAuth, 'A0001', 'authenticated');
+        $bye     = new Response(ResponseStatus::Bye, 'A0001', 'closing');
+
+        self::assertFalse($preAuth->isOk());
+        self::assertFalse($bye->isOk());
+    }
+
     public function testGetUntaggedByTypeIsCaseInsensitive(): void
     {
         $a = new UntaggedResponse('FETCH', ['seq' => 1]);
