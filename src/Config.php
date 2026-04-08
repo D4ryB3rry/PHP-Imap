@@ -21,6 +21,8 @@ readonly class Config
         public ?array $clientId = null,
         public array $sslOptions = [],
         public ?string $logPath = null,
+        public ?string $recordPath = null,
+        public bool $recordRedactCredentials = true,
     ) {
     }
 

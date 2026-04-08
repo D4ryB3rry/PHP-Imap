@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace D4ry\ImapClient;
 
 use D4ry\ImapClient\Collection\FolderCollection;
+use D4ry\ImapClient\Connection\Contract\ConnectionInterface;
 use D4ry\ImapClient\Connection\LoggingConnection;
+use D4ry\ImapClient\Connection\RecordingConnection;
+use D4ry\ImapClient\Connection\ReplayConnection;
 use D4ry\ImapClient\Connection\SocketConnection;
 use D4ry\ImapClient\Contract\FolderInterface;
 use D4ry\ImapClient\Contract\MailboxInterface;
@@ -42,8 +45,38 @@ readonly class Mailbox implements MailboxInterface
             $connection = new LoggingConnection($connection, $config->logPath);
         }
 
+        if ($config->recordPath !== null) {
+            $connection = new RecordingConnection($connection, $config->recordPath, $config->recordRedactCredentials);
+        }
+
         $connection->open($config->host, $config->port, $config->encryption, $config->timeout, $config->sslOptions);
 
+        return self::performHandshake($connection, $config);
+    }
+
+    /**
+     * Build a Mailbox by replaying a previously captured session from disk.
+     *
+     * Uses {@see ReplayConnection} as the I/O backend instead of a real socket.
+     * The full connect lifecycle still runs (greeting, optional STARTTLS,
+     * authenticate, ENABLE, ID) — every outbound write is validated against
+     * the recording, so the supplied $config must match the credentials and
+     * feature flags that were used when the session was recorded. Mismatches
+     * raise {@see \D4ry\ImapClient\Exception\ReplayMismatchException}.
+     *
+     * The host/port/encryption/timeout/sslOptions fields of $config are
+     * passed through but have no real effect, since no socket is opened.
+     */
+    public static function connectFromRecording(string $recordPath, Config $config): self
+    {
+        $connection = new ReplayConnection($recordPath);
+        $connection->open($config->host, $config->port, $config->encryption, $config->timeout, $config->sslOptions);
+
+        return self::performHandshake($connection, $config);
+    }
+
+    private static function performHandshake(ConnectionInterface $connection, Config $config): self
+    {
         $transceiver = new Transceiver($connection);
 
         $greeting = $transceiver->readGreeting();

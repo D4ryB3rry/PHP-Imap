@@ -21,6 +21,8 @@ use D4ry\ImapClient\Idle\RecentCountEvent;
 use D4ry\ImapClient\Auth\LoginCredential;
 use D4ry\ImapClient\Config;
 use D4ry\ImapClient\Connection\LoggingConnection;
+use D4ry\ImapClient\Connection\RecordingConnection;
+use D4ry\ImapClient\Connection\ReplayConnection;
 use D4ry\ImapClient\Connection\SocketConnection;
 use D4ry\ImapClient\Enum\Encryption;
 use D4ry\ImapClient\Mailbox;
@@ -67,6 +69,8 @@ use ReflectionProperty;
 #[UsesClass(Config::class)]
 #[UsesClass(SocketConnection::class)]
 #[UsesClass(LoggingConnection::class)]
+#[UsesClass(RecordingConnection::class)]
+#[UsesClass(ReplayConnection::class)]
 #[UsesClass(\D4ry\ImapClient\Connection\Redactor::class)]
 #[UsesClass(\D4ry\ImapClient\Exception\TimeoutException::class)]
 final class MailboxTest extends TestCase
@@ -642,6 +646,104 @@ final class MailboxTest extends TestCase
         } finally {
             $server->reap($pid);
             $server->stop();
+        }
+    }
+
+    public function testConnectFromRecordingReplaysCapturedSession(): void
+    {
+        if (!function_exists('pcntl_fork')) {
+            self::markTestSkipped('pcntl extension required');
+        }
+
+        $server = new LoopbackServer();
+        $server->start('plain');
+
+        $pid = $server->forkAccept(function ($peer): void {
+            $readLine = static function ($peer): string {
+                $line = '';
+                while (($c = fread($peer, 1)) !== false && $c !== '') {
+                    $line .= $c;
+                    if (str_ends_with($line, "\r\n")) {
+                        return $line;
+                    }
+                }
+                return $line;
+            };
+            $writeLine = static function ($peer, string $line): void {
+                fwrite($peer, $line . "\r\n");
+                fflush($peer);
+            };
+
+            // 1) Greeting.
+            $writeLine($peer, '* OK ready');
+
+            // 2) LOGIN — capabilities piggy-backed on the OK response code so
+            //    no separate CAPABILITY round-trip is needed.
+            $readLine($peer); // A0001 LOGIN ...
+            $writeLine($peer, '* CAPABILITY IMAP4rev1 ENABLE ID UTF8=ACCEPT IDLE');
+            $writeLine($peer, 'A0001 OK [CAPABILITY IMAP4rev1 ENABLE ID UTF8=ACCEPT IDLE] LOGIN done');
+
+            // 3) ENABLE CONDSTORE QRESYNC UTF8=ACCEPT
+            $readLine($peer);
+            $writeLine($peer, '* ENABLED CONDSTORE QRESYNC UTF8=ACCEPT');
+            $writeLine($peer, 'A0002 OK ENABLE done');
+
+            // 4) ID
+            $readLine($peer);
+            $writeLine($peer, '* ID ("name" "TestServer")');
+            $writeLine($peer, 'A0003 OK ID done');
+
+            usleep(100_000);
+        });
+
+        $recordPath = sys_get_temp_dir() . '/imap-record-test-' . uniqid('', true) . '.jsonl';
+
+        try {
+            // 1. Live connect — captures the session to disk. Redaction is
+            //    disabled so the recorded LOGIN write matches what the replay
+            //    will produce when authenticate() runs again.
+            $recordingConfig = new Config(
+                host: $server->host(),
+                credential: new LoginCredential('user', 'pass'),
+                port: $server->port(),
+                encryption: Encryption::None,
+                timeout: 2.0,
+                enableCondstore: true,
+                enableQresync: true,
+                utf8Accept: true,
+                clientId: ['name' => 'TestClient'],
+                recordPath: $recordPath,
+                recordRedactCredentials: false,
+            );
+
+            $live = Mailbox::connect($recordingConfig);
+            self::assertInstanceOf(Mailbox::class, $live);
+            self::assertFileExists($recordPath);
+            self::assertGreaterThan(0, filesize($recordPath));
+
+            // 2. Replay against the captured fixture — no network, no server.
+            //    The Config's host/port/encryption/timeout/sslOptions are
+            //    accepted but ignored; credentials and feature flags must
+            //    match what was recorded.
+            $replayConfig = new Config(
+                host: 'replay.invalid',
+                credential: new LoginCredential('user', 'pass'),
+                port: 993,
+                encryption: Encryption::None,
+                timeout: 2.0,
+                enableCondstore: true,
+                enableQresync: true,
+                utf8Accept: true,
+                clientId: ['name' => 'TestClient'],
+            );
+
+            $replayed = Mailbox::connectFromRecording($recordPath, $replayConfig);
+
+            self::assertInstanceOf(Mailbox::class, $replayed);
+        } finally {
+            $server->reap($pid);
+            $server->stop();
+            @unlink($recordPath);
         }
     }
 }
