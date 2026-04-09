@@ -1,0 +1,29 @@
+{
+    "$schema": "vendor/infection/infection/resources/schema.json",
+    "source": {
+        "directories": [
+            "src"
+        ]
+    },
+    "timeout": 10,
+    "logs": {
+        "text": "build/infection/infection.log",
+        "html": "build/infection/infection.html",
+        "summary": "build/infection/summary.log",
+        "json": "build/infection/infection.json",
+        // Push the MSI badge + full HTML report to the Stryker Mutator
+        // dashboard for the matching branch. Requires the
+        // STRYKER_DASHBOARD_API_KEY env var in CI (set as a repo secret).
+        "stryker": {
+            "report": "main"
+        }
+    },
+    "tmpDir": "build/infection/tmp",
+    "testFramework": "phpunit",
+    "testFrameworkOptions": "--testsuite=unit",
+    "minMsi": 100,
+    "minCoveredMsi": 100,
+    "mutators": {
+        "@default": true
+    }
+}

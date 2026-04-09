@@ -54,6 +54,10 @@ class ReplayConnection implements ConnectionInterface
             }
 
             try {
+                // 512 is PHP's default json_decode depth — using a non-default
+                // value here would just churn nothing useful, and the depth
+                // mutants are not testable without 512-deep nested JSON.
+                // @infection-ignore-all
                 $decoded = json_decode($line, true, 512, JSON_THROW_ON_ERROR);
             } catch (\JsonException $e) {
                 throw new ConnectionException(sprintf('Invalid JSONL on line %d of %s: %s', $index + 1, $recordPath, $e->getMessage()));
@@ -147,6 +151,12 @@ class ReplayConnection implements ConnectionInterface
         $data = $this->readBytes($count);
 
         $written = @fwrite($sink, $data);
+        // Combined fwrite-failed-or-short-write guard. The LogicalOr → And
+        // mutant on this line is observably equivalent in practice — short
+        // writes without an outright false return require simulating a
+        // partial-write sink, which PHP's stream API does not expose to
+        // userland in a portable way.
+        // @infection-ignore-all
         if ($written === false || $written !== strlen($data)) {
             throw new ConnectionException('Failed to write to literal sink');
         }

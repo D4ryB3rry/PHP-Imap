@@ -55,3 +55,47 @@ jobs:
           fail_ci_if_error: false
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  infection:
+    name: Mutation Testing
+    runs-on: ubuntu-latest
+    # Run infection only once (against the latest PHP version) so the
+    # Stryker dashboard receives a single push per commit.
+    needs: tests
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Infection's git-diff filter and the Stryker dashboard reporter
+          # both want full history to identify the base commit.
+          fetch-depth: 0
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: mbstring
+          coverage: xdebug
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-php-8.5-${{ hashFiles('**/composer.lock') }}
+          restore-keys: ${{ runner.os }}-php-8.5-
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: Run Infection
+        # The Stryker dashboard reporter activates only when the API key
+        # is present, so PRs from forks (which don't have access to the
+        # secret) still run infection but skip the dashboard upload.
+        env:
+          STRYKER_DASHBOARD_API_KEY: ${{ secrets.STRYKER_DASHBOARD_API_KEY }}
+        run: composer infection:ci

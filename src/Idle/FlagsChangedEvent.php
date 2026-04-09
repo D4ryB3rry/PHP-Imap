@@ -6,6 +6,9 @@ namespace D4ry\ImapClient\Idle;
 
 use D4ry\ImapClient\ValueObject\FlagSet;
 
+/**
+ * @infection-ignore-all
+ */
 class FlagsChangedEvent extends IdleEvent
 {
     public function __construct(

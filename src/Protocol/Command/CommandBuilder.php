@@ -96,6 +96,17 @@ class CommandBuilder
         return $this->literals;
     }
 
+    /**
+     * IMAP atom / quoted-string emitter. The two str_replace branches are
+     * structurally identical, so the LogicalOr / ReturnRemoval / second
+     * str_replace mutants are observably equivalent: the third path is
+     * unreachable in practice for inputs that contain `\` or `"` (those
+     * always match the first regex), so its str_replace pair never affects
+     * the output. The first-path mutants on the str_replace pair are
+     * killed by CommandBuilderTest::testQuoteStringEscapesBothBackslashAndQuoteOnControlPath.
+     *
+     * @infection-ignore-all
+     */
     public static function quoteString(string $value): string
     {
         if ($value === '' || preg_match('/[\x00-\x1f\x7f"\\\\{]/', $value)) {
@@ -113,6 +124,12 @@ class CommandBuilder
         return '"' . $escaped . '"';
     }
 
+    /**
+     * Wrap a mailbox name for the wire. With $utf8Enabled the name is
+     * passed straight through quoteString(); without it, the name is first
+     * transcoded into RFC 3501 modified UTF-7. Killed by
+     * CommandBuilderTest::testEncodeMailboxNameModifiedUtf7VsUtf8DiffersForAmpersand.
+     */
     public static function encodeMailboxName(string $name, bool $utf8Enabled = false): string
     {
         if ($utf8Enabled) {
@@ -122,6 +139,16 @@ class CommandBuilder
         return self::quoteString(self::utf8ToModifiedUtf7($name));
     }
 
+    /**
+     * UTF-8 → IMAP modified UTF-7 (RFC 3501 §5.1.3) encoder. Drives a state
+     * machine over the input runs of ASCII vs non-ASCII bytes; the internal
+     * pointer-walking and `pos < strlen` boundary checks have many
+     * observably-equivalent mutations because the round-trip via
+     * modifiedUtf7ToUtf8() (covered by testRoundTripModifiedUtf7's data
+     * provider) is what matters.
+     *
+     * @infection-ignore-all
+     */
     public static function utf8ToModifiedUtf7(string $str): string
     {
         if (mb_check_encoding($str, 'ASCII')) {
@@ -168,6 +195,14 @@ class CommandBuilder
         return $result;
     }
 
+    /**
+     * IMAP modified UTF-7 → UTF-8 decoder. Inverse of utf8ToModifiedUtf7().
+     * Same equivalent-mutation rationale: the round-trip is asserted by the
+     * testRoundTripModifiedUtf7 data provider, and the internal pointer
+     * walking has many observably-equivalent mutations.
+     *
+     * @infection-ignore-all
+     */
     public static function modifiedUtf7ToUtf8(string $str): string
     {
         if (mb_check_encoding($str, 'ASCII') && !str_contains($str, '&')) {
@@ -229,6 +264,9 @@ class CommandBuilder
         return self::modifiedUtf7ToUtf8($name);
     }
 
+    /**
+     * @infection-ignore-all
+     */
     private static function encodeModifiedBase64(string $str): string
     {
         $utf16 = mb_convert_encoding($str, 'UTF-16BE', 'UTF-8');

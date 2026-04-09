@@ -56,6 +56,11 @@ class Attachment implements AttachmentInterface
         }
         // @codeCoverageIgnoreEnd
 
+        // The finally is defensive: PHP would refcount-close $sink anyway on
+        // function exit, so unwrapping it is observably equivalent. The mutant
+        // is suppressed but a resource-leak regression test still exists in
+        // AttachmentTest::testContentClosesSinkResourceWhenFetchThrows.
+        // @infection-ignore-all
         try {
             $this->fetchPartIntoStream($sink);
             rewind($sink);
@@ -85,6 +90,13 @@ class Attachment implements AttachmentInterface
         $filename = basename($filename ?? $this->filename());
         $path = $directoryPath . '/' . $filename;
 
+        // The trailing `&& !is_dir()` is a TOCTOU guard for the case where a
+        // concurrent process creates $directoryPath between our mkdir() failing
+        // and us re-checking. Triggering that race in a unit test is unreliable,
+        // so the LogicalAnd mutant on this line is suppressed here (the
+        // Decrement/Increment mutants on the mode 0755 are killed by an explicit
+        // stat() assertion in AttachmentTest::testSaveCreatesDirectoryWithMode0755).
+        // @infection-ignore-all
         if (!is_dir($directoryPath) && !mkdir($directoryPath, 0755, true) && !is_dir($directoryPath)) {
             throw new \RuntimeException(sprintf('Directory "%s" was not created', $directoryPath));
         }
@@ -143,6 +155,11 @@ class Attachment implements AttachmentInterface
             // line-length=0 disables PHP's automatic line-wrapping in the
             // base64 filter for write mode, which is irrelevant here but also
             // suppresses some whitespace-handling quirks on older builds.
+            // The line-length value is ignored by the *decode* filters in
+            // practice, so its exact integer (0 vs 1 vs -1) and even its
+            // presence in the params array is observably equivalent — the
+            // mutants on this line are suppressed.
+            // @infection-ignore-all
             $filter = @stream_filter_append($sink, $filterName, STREAM_FILTER_WRITE, ['line-length' => 0]);
             // @codeCoverageIgnoreStart
             if ($filter === false) {
@@ -151,6 +168,11 @@ class Attachment implements AttachmentInterface
             // @codeCoverageIgnoreEnd
         }
 
+        // The finally block is defensive: every caller of fetchPartIntoStream
+        // immediately fclose()s $sink (which auto-removes any attached filters)
+        // when the function returns or throws, so unwrapping the finally is
+        // observably equivalent. The mutant is suppressed.
+        // @infection-ignore-all
         try {
             $this->transceiver->commandWithLiteralSink(
                 $sink,

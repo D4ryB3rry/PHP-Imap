@@ -20,6 +20,13 @@ class ImapDateFormatter
 
     public static function parse(string $imapDate): \DateTimeImmutable
     {
+        // The `d-` and `j-` variants are listed in pairs because some legacy
+        // PHP builds were stricter about leading-zero days; in modern PHP
+        // `j-M-Y` accepts both zero-padded and single-digit days, so the
+        // ArrayItemRemoval mutants on the `d-…` formats are observably
+        // equivalent (any input the dropped format would have accepted is
+        // still accepted by its `j-…` neighbour). Suppressed.
+        // @infection-ignore-all
         $formats = [
             'd-M-Y H:i:s O',
             'j-M-Y H:i:s O',

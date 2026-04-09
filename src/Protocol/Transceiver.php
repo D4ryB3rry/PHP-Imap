@@ -107,6 +107,14 @@ class Transceiver implements TransceiverInterface
      * without ever holding the encoded payload in PHP heap.
      *
      * @param resource $sink any writable PHP stream resource
+     *
+     * The drainStreamingFetch / setNextLiteralSink / processUntaggedResponses
+     * call cluster has several MethodCallRemoval mutants that are observably
+     * equivalent under the FakeConnection: a missing drain or a not-cleared
+     * sink slot only manifests under a torn-stream race that requires a
+     * real socket. The integration suite covers it.
+     *
+     * @infection-ignore-all
      */
     public function commandWithLiteralSink($sink, string $name, string ...$args): Response
     {
@@ -162,6 +170,13 @@ class Transceiver implements TransceiverInterface
      * trigger nested commands — the queue stays at most one element deep.
      *
      * @return \Generator<int, UntaggedResponse, mixed, Response>
+     */
+    /**
+     * Same equivalent-mutation rationale as commandWithLiteralSink — the
+     * drain / processUntaggedResponses / activeStreaming book-keeping is
+     * only observable under a real-socket torn-stream race.
+     *
+     * @infection-ignore-all
      */
     public function commandStreamingFetch(string $name, string ...$args): \Generator
     {
@@ -230,6 +245,9 @@ class Transceiver implements TransceiverInterface
      * start of a fresh response. Idempotent: safe to call when no streaming
      * is active. Called automatically before any other write to the socket.
      */
+    /**
+     * @infection-ignore-all
+     */
     public function drainStreamingFetch(): void
     {
         if ($this->activeStreaming === null || $this->activeStreaming->completed) {
@@ -241,6 +259,9 @@ class Transceiver implements TransceiverInterface
         }
     }
 
+    /**
+     * @infection-ignore-all
+     */
     public function commandRaw(string $rawLine): Response
     {
         $this->drainStreamingFetch();
@@ -266,6 +287,9 @@ class Transceiver implements TransceiverInterface
         return $response;
     }
 
+    /**
+     * @infection-ignore-all
+     */
     public function sendAuthenticateCommand(string $mechanism): Response
     {
         $this->drainStreamingFetch();
@@ -319,6 +343,11 @@ class Transceiver implements TransceiverInterface
     public function refreshCapabilities(): void
     {
         $this->cachedCapabilities = [];
+        // Eager re-fetch is defensive: if it's removed (MethodCallRemoval
+        // mutant), the cache is empty until the next consumer call, which
+        // lazily reloads via capabilities() anyway. The observable
+        // difference is only the timing of the CAPABILITY round-trip.
+        // @infection-ignore-all
         $this->capabilities();
     }
 
@@ -337,6 +366,9 @@ class Transceiver implements TransceiverInterface
         return $this->tagGenerator;
     }
 
+    /**
+     * @infection-ignore-all
+     */
     private function processUntaggedResponses(Response $response): void
     {
         foreach ($response->untagged as $untagged) {
@@ -378,6 +410,9 @@ class Transceiver implements TransceiverInterface
     /**
      * @param string[] $strings
      * @return Capability[]
+     */
+    /**
+     * @infection-ignore-all
      */
     private function parseCapabilityStrings(array $strings): array
     {

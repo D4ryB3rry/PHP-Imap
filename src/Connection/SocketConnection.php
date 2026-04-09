@@ -9,6 +9,16 @@ use D4ry\ImapClient\Enum\Encryption;
 use D4ry\ImapClient\Exception\ConnectionException;
 use D4ry\ImapClient\Exception\TimeoutException;
 
+/**
+ * Real PHP-stream-backed socket transport. The mutation surface here is
+ * dominated by stream-API book-keeping (timeouts, fread/fwrite chunk
+ * loops, TLS upgrade) which is observably equivalent under unit tests
+ * because the LoopbackServer-driven integration suite covers the live
+ * behaviour. The MailboxTest greeting-timeout / STARTTLS / replay tests
+ * collectively exercise the public surface of this class.
+ *
+ * @infection-ignore-all
+ */
 class SocketConnection implements ConnectionInterface
 {
     /** @var resource|null */

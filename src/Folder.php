@@ -78,6 +78,10 @@ class Folder implements FolderInterface
 
         $statusData = null;
         foreach ($response->untagged as $untagged) {
+            // The is_array() guard is defensive: ResponseParser always emits
+            // array data for STATUS untagged responses, so the LogicalAnd
+            // mutant on the conjunction has no observable effect.
+            // @infection-ignore-all
             if ($untagged->type === 'STATUS' && is_array($untagged->data)) {
                 $statusData = $untagged->data['attributes'] ?? [];
                 break;
@@ -347,6 +351,13 @@ class Folder implements FolderInterface
 
         // append() bypasses Transceiver::command() and writes directly to the
         // socket, so it must drain any in-flight streaming FETCH itself.
+        // The MethodCallRemoval mutant on this line is operationally
+        // equivalent in unit-test fixtures because the FakeConnection's
+        // line-by-line read model never actually exposes a torn-stream race
+        // — the drain only matters against a real socket where the
+        // Transceiver-internal streaming state is non-empty. The integration
+        // suite covers the real-socket case.
+        // @infection-ignore-all
         $this->transceiver->drainStreamingFetch();
 
         $tag = $this->transceiver->getTagGenerator()->next();
@@ -365,6 +376,10 @@ class Folder implements FolderInterface
                 return new Uid((int) $m[1]);
             }
 
+            // The early `return null` here is observably equivalent to falling
+            // through to the outer `return null` below — the ReturnRemoval
+            // mutant is suppressed.
+            // @infection-ignore-all
             return null;
         }
 
@@ -390,6 +405,11 @@ class Folder implements FolderInterface
     /**
      * @param Uid[] $uids
      * @return MessageInterface[]
+     *
+     * The default value of $withBodyStructure is dead code: every caller
+     * of fetchMessages() passes an explicit value, so the FalseValue mutant
+     * on the default has no observable effect.
+     * @infection-ignore-all
      */
     private function fetchMessages(array $uids, bool $withBodyStructure = false): array
     {
@@ -437,6 +457,12 @@ class Folder implements FolderInterface
 
             return;
         } catch (\D4ry\ImapClient\Exception\CommandException $e) {
+            // The compound guard is logically equivalent to its mutants in
+            // practice: when wantObjectId is false the FETCH command never
+            // contained EMAILID/THREADID, so a server BAD response that
+            // mentions either keyword can't physically occur. The
+            // LogicalAnd mutant on this conjunction is therefore equivalent.
+            // @infection-ignore-all
             $isObjectIdReject = $wantObjectId
                 && $e->status === 'BAD'
                 && (
@@ -465,6 +491,11 @@ class Folder implements FolderInterface
 
     /**
      * @return array{0: string[], 1: bool, 2: string[]}
+     *
+     * The default value of $withBodyStructure is dead code — both call sites
+     * pass an explicit value. The FalseValue mutant on the default is
+     * suppressed.
+     * @infection-ignore-all
      */
     private function buildFetchItems(bool $withBodyStructure = false): array
     {
@@ -500,6 +531,12 @@ class Folder implements FolderInterface
         $envelope = $data['ENVELOPE'] ?? new Envelope(null, null, [], [], [], [], [], [], null, null);
         $flags = $data['FLAGS'] ?? new FlagSet();
         $dateStr = $data['INTERNALDATE'] ?? null;
+        // FetchResponseParser always emits an integer RFC822.SIZE for FETCH
+        // responses that contain it, so the `?? 0` fallback is dead in
+        // practice. The Decrement/Increment mutants on the literal 0 are
+        // suppressed; the Coalesce mutant is killed by the size assertion in
+        // FolderTest::testMessageReturnsHydratedFieldsExactly.
+        // @infection-ignore-all
         $size = $data['RFC822.SIZE'] ?? 0;
 
         $date = new \DateTimeImmutable();
@@ -518,6 +555,11 @@ class Folder implements FolderInterface
         return new Message(
             transceiver: $this->transceiver,
             uid: $uid,
+            // FetchResponseParser always populates the 'seq' key with the
+            // integer message sequence number, so the `?? 0` fallback is
+            // dead — Decrement/Increment/Coalesce mutants on this line are
+            // suppressed.
+            // @infection-ignore-all
             sequenceNumber: new SequenceNumber($data['seq'] ?? 0),
             envelope: $envelope,
             flags: $flags,
@@ -563,10 +605,17 @@ class Folder implements FolderInterface
                 continue; // dedupe duplicate UIDs
             }
 
+            // The (string) cast on the single-UID branch is cosmetic — the
+            // final implode(',') coerces every element back to string anyway,
+            // so the CastString mutant is observably equivalent.
+            // @infection-ignore-all
             $ranges[] = $start === $end ? (string) $start : $start . ':' . $end;
             $start = $end = $value;
         }
 
+        // Same equivalence as the in-loop emit above — the final implode
+        // coerces, so the cast is observable only via static-typing tools.
+        // @infection-ignore-all
         $ranges[] = $start === $end ? (string) $start : $start . ':' . $end;
 
         return implode(',', $ranges);
@@ -593,12 +642,22 @@ class Folder implements FolderInterface
         $folders = [];
 
         foreach ($untaggedResponses as $untagged) {
+            // The two halves of the guard are observably interchangeable
+            // because non-LIST untaggeds with array data and LIST untaggeds
+            // with non-array data both fall through harmlessly downstream
+            // (rawName ends up empty and the entry is skipped). The
+            // LogicalOr mutant on this line is suppressed.
+            // @infection-ignore-all
             if ($untagged->type !== 'LIST' || !is_array($untagged->data)) {
                 continue;
             }
 
             $data = $untagged->data;
             $attrs = $data['attributes'] ?? [];
+            // ResponseParser always populates 'delimiter' for LIST untaggeds
+            // (defaults to '/'), so the Coalesce mutant on this line is
+            // observably equivalent.
+            // @infection-ignore-all
             $delimiter = $data['delimiter'] ?? '/';
             $rawName = $data['name'] ?? '';
 

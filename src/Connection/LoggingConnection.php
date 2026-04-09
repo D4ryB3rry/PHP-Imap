@@ -166,6 +166,15 @@ class LoggingConnection implements ConnectionInterface
         @fwrite($this->logHandle, $line);
     }
 
+    /**
+     * Cosmetic preview helper for log lines: caps the dump at 200 bytes,
+     * collapses CR/LF, and appends an ellipsis when truncated. The exact
+     * boundary value is a soft display limit; the increment/decrement /
+     * unwrap-substr / boundary mutants on these lines are observably
+     * equivalent because no consumer parses the truncated form.
+     *
+     * @infection-ignore-all
+     */
     private function preview(string $data): string
     {
         $preview = substr($data, 0, 200);

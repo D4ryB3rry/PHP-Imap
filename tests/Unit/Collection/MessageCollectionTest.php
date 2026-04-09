@@ -17,8 +17,10 @@ final class MessageCollectionTest extends TestCase
 {
     public function testLazyLoaderInvokedOnce(): void
     {
+        $a = $this->createStub(MessageInterface::class);
+        $b = $this->createStub(MessageInterface::class);
         $calls = 0;
-        $messages = [$this->createStub(MessageInterface::class), $this->createStub(MessageInterface::class)];
+        $messages = [$a, $b];
         $collection = new MessageCollection(function () use (&$calls, $messages) {
             $calls++;
             return $messages;
@@ -26,10 +28,34 @@ final class MessageCollectionTest extends TestCase
 
         self::assertSame(2, $collection->count());
         self::assertSame(2, $collection->count());
-        self::assertNotNull($collection->first());
+        // Pin first() to messages[0] to kill the IncrementInteger mutant
+        // (line 88) that would index into [1] instead.
+        self::assertSame($a, $collection->first());
         $collection->toArray();
 
         self::assertSame(1, $calls);
+    }
+
+    public function testIteratorPreservesOrderWhenLoadingFromGenerator(): void
+    {
+        // The iterator_to_array() call inside MessageCollection::load() must
+        // pass `false` for preserve_keys so the resulting array is
+        // sequentially indexed from 0. The FalseValue mutant on that
+        // argument would re-key the messages by their generator key (still
+        // 0..N for `yield $x`), so the *observable* difference is what
+        // toArray() returns when the underlying generator yields with
+        // explicit string keys. Use that as the kill condition.
+        $a = $this->createStub(MessageInterface::class);
+        $b = $this->createStub(MessageInterface::class);
+        $collection = new MessageCollection(function () use ($a, $b) {
+            yield 'one' => $a;
+            yield 'two' => $b;
+        });
+
+        // load() runs via count(); it must produce a 0-indexed list, not
+        // a string-keyed map.
+        self::assertSame(2, $collection->count());
+        self::assertSame([0 => $a, 1 => $b], $collection->toArray());
     }
 
     public function testFromArrayBypassesLoader(): void

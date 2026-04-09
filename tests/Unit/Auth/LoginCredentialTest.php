@@ -56,6 +56,27 @@ final class LoginCredentialTest extends TestCase
         );
     }
 
+    public function testAuthenticateEscapesBackslashAndDoubleQuoteInBothFields(): void
+    {
+        // Both username and password contain BOTH a backslash and a double
+        // quote, so the str_replace() pair on each side has to escape both
+        // characters: `\` → `\\` and `"` → `\"`. Removing either array item
+        // (ArrayItemRemoval), or unwrapping the whole str_replace
+        // (UnwrapStrReplace), produces a different LOGIN line on the wire —
+        // the byte-exact assertion below catches all three mutants.
+        $connection = new FakeConnection();
+        $transceiver = new Transceiver($connection);
+
+        $connection->queueLines('A0001 OK Logged in');
+
+        (new LoginCredential('us\\er"x', 'p\\a"ss'))->authenticate($transceiver);
+
+        self::assertSame(
+            ["A0001 LOGIN \"us\\\\er\\\"x\" \"p\\\\a\\\"ss\"\r\n"],
+            $connection->writes,
+        );
+    }
+
     public function testAuthenticateThrowsOnFailure(): void
     {
         $connection = new FakeConnection();
@@ -63,9 +84,16 @@ final class LoginCredentialTest extends TestCase
 
         $connection->queueLines('A0001 NO Login failed');
 
-        $this->expectException(AuthenticationException::class);
-        $this->expectExceptionMessage('LOGIN authentication failed');
-
-        (new LoginCredential('user', 'pass'))->authenticate($transceiver);
+        try {
+            (new LoginCredential('user', 'pass'))->authenticate($transceiver);
+            self::fail('Expected AuthenticationException');
+        } catch (AuthenticationException $e) {
+            // Exact message kills Concat (reorder), ConcatOperandRemoval and
+            // any future Concat mutants on the message construction.
+            self::assertSame('LOGIN authentication failed: Login failed', $e->getMessage());
+            // Exact code kills Increment/Decrement on the literal `0`.
+            self::assertSame(0, $e->getCode());
+            self::assertInstanceOf(CommandException::class, $e->getPrevious());
+        }
     }
 }

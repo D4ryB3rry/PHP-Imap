@@ -478,6 +478,112 @@ final class AttachmentTest extends TestCase
         self::assertFileDoesNotExist($expectedPath);
     }
 
+    public function testContentClosesSinkResourceWhenFetchThrows(): void
+    {
+        // Drives content() against an empty FakeConnection — fetchPartIntoStream
+        // → commandWithLiteralSink → readLine() throws on the empty queue, so
+        // the exception bubbles up *after* fopen('php://temp') has allocated
+        // the local sink. The try/finally in content() must close the sink so
+        // no stream resource leaks. We observe this by counting open stream
+        // resources before and after the failing call.
+        $structure = $this->makeStructure(encoding: ContentTransferEncoding::SevenBit, partNumber: '2');
+        [$attachment] = $this->makeAttachment(new FakeConnection(), $structure);
+
+        $before = count(get_resources('stream'));
+
+        try {
+            $attachment->content();
+            self::fail('Expected RuntimeException from FakeConnection');
+        } catch (RuntimeException) {
+            // expected
+        }
+
+        $after = count(get_resources('stream'));
+        self::assertSame($before, $after, 'content() must close its sink resource even when the fetch throws');
+    }
+
+    public function testSaveCallsEnsureSelectedWhenFolderNotSelected(): void
+    {
+        // save() must SELECT the folder before issuing UID FETCH on the cold
+        // path (no cached content). Removing the ensureSelected() call would
+        // skip the SELECT command — assert it appears as the first wire write.
+        $payload = 'doc-bytes';
+        $connection = new FakeConnection();
+        $connection->queueLines('A0001 OK SELECT done');
+        $connection->queueLines('* 1 FETCH (UID 42 BODY[2] {' . strlen($payload) . '}');
+        $connection->queueBytes($payload);
+        $connection->queueLines(
+            ')',
+            'A0002 OK FETCH done',
+        );
+
+        $structure = $this->makeStructure(
+            encoding: ContentTransferEncoding::SevenBit,
+            dispositionFilename: 'doc.bin',
+            partNumber: '2',
+        );
+        [$attachment, $transceiver] = $this->makeAttachment($connection, $structure, preselect: false);
+
+        $dir = $this->makeTempDir();
+        $attachment->save($dir);
+
+        self::assertSame("A0001 SELECT INBOX\r\n", $connection->writes[0]);
+        self::assertSame("A0002 UID FETCH 42 (BODY.PEEK[2])\r\n", $connection->writes[1]);
+        self::assertSame('INBOX', $transceiver->selectedMailbox);
+        self::assertSame($payload, file_get_contents($dir . '/doc.bin'));
+    }
+
+    public function testSaveCreatesDirectoryWithMode0755(): void
+    {
+        // Pin umask so the resulting permission bits are deterministic, then
+        // verify mkdir() actually used 0755 (kills the Increment/Decrement
+        // mutants on the mode literal in Attachment::save()).
+        $previousUmask = umask(0022);
+        try {
+            $structure = $this->makeStructure(dispositionFilename: 'note.txt');
+            [$attachment] = $this->makeAttachment(new FakeConnection(), $structure);
+            $this->primeCachedContent($attachment, 'note');
+
+            $base = $this->makeTempDir();
+            $created = $base . '/created/sub';
+            $attachment->save($created);
+
+            clearstatcache(true, $created);
+            self::assertDirectoryExists($created);
+            self::assertSame(0755, fileperms($created) & 0777);
+        } finally {
+            umask($previousUmask);
+        }
+    }
+
+    public function testSaveTrimsTrailingSlashFromDirectoryPathInErrorMessage(): void
+    {
+        // The exact error message embeds $directoryPath *after* rtrim('/'), so
+        // a path passed in with a trailing slash must surface in the message
+        // *without* it. Removing the rtrim() call would leave the slash in the
+        // message — assert the trimmed form to kill the UnwrapRtrim mutant.
+        $structure = $this->makeStructure(dispositionFilename: 'never.txt');
+        [$attachment] = $this->makeAttachment(new FakeConnection(), $structure);
+        $this->primeCachedContent($attachment, 'never');
+
+        $base = $this->makeTempDir();
+        $blockingFile = $base . '/blocker';
+        file_put_contents($blockingFile, 'x');
+        $impossibleDir = $blockingFile . '/sub';
+
+        set_error_handler(static fn (): bool => true, E_WARNING);
+
+        try {
+            $this->expectException(RuntimeException::class);
+            // The trailing slash on the input must NOT appear in the message.
+            $this->expectExceptionMessage(sprintf('Directory "%s" was not created', $impossibleDir));
+
+            $attachment->save($impossibleDir . '/');
+        } finally {
+            restore_error_handler();
+        }
+    }
+
     public function testSaveThrowsWhenDirectoryCannotBeCreated(): void
     {
         $structure = $this->makeStructure(dispositionFilename: 'doomed.txt');

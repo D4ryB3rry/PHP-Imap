@@ -42,6 +42,21 @@ final class FlagSetTest extends TestCase
         self::assertNotSame($original, $added);
     }
 
+    public function testAddNormalizesMixedEnumAndStringInputs(): void
+    {
+        // The instanceof / ternary mutants on FlagSet::add() are killed by
+        // mixing a Flag enum with a literal `\Custom` string in the same
+        // call. Original maps the Flag to its `->value` and keeps the
+        // string as-is, so both end up in the resulting set; mutating the
+        // ternary swaps the branches and either crashes (string `->value`
+        // call) or produces a Flag-typed entry that fails the has() check.
+        $set = (new FlagSet())->add(Flag::Seen, '\Custom');
+
+        self::assertSame(2, $set->count());
+        self::assertTrue($set->has(Flag::Seen));
+        self::assertTrue($set->has('\Custom'));
+    }
+
     public function testRemoveReturnsNewInstance(): void
     {
         $set = new FlagSet([Flag::Seen, Flag::Flagged]);

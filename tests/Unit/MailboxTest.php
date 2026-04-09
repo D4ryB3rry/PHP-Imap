@@ -202,6 +202,18 @@ final class MailboxTest extends TestCase
         );
     }
 
+    public function testIdReturnsNullWhenNoIdUntaggedPresent(): void
+    {
+        // Server returns OK but never emits a `* ID` untagged. id() must
+        // fall through and return null.
+        $connection = new FakeConnection();
+        $connection->queueLines('A0001 OK ID done');
+
+        [$mailbox] = $this->makeMailbox($connection, Capability::Id);
+
+        self::assertNull($mailbox->id());
+    }
+
     public function testIdThrowsWhenCapabilityMissing(): void
     {
         $connection = new FakeConnection();
@@ -719,6 +731,15 @@ final class MailboxTest extends TestCase
                 $transceiver->hasCapability(Capability::ObjectId),
                 'Stale pre-auth OBJECTID must be evicted by post-auth CAPABILITY refresh',
             );
+            // Pin a capability that the post-auth refresh response *did*
+            // include — without an actual call to refreshCapabilities()
+            // the cached set would be empty and this assertion would fail.
+            // Kills the MethodCallRemoval mutant on
+            // Transceiver::refreshCapabilities() line 343.
+            self::assertTrue(
+                $transceiver->hasCapability(Capability::Idle),
+                'Post-auth refresh must populate the capability cache',
+            );
         } finally {
             $server->reap($pid);
             $server->stop();
@@ -813,13 +834,64 @@ final class MailboxTest extends TestCase
                 Mailbox::connect($config);
                 self::fail('Expected ConnectionException');
             } catch (ConnectionException $e) {
-                self::assertStringContainsString('No IMAP greeting from', $e->getMessage());
-                self::assertStringContainsString('encryption=StartTls', $e->getMessage());
-                self::assertStringContainsString('try Encryption::Tls', $e->getMessage());
+                // Pin the exact full hint message — kills the Concat /
+                // ConcatOperandRemoval mutants on the StartTls/None branch
+                // of the buildGreetingTimeoutHint() match expression.
+                $expected = sprintf(
+                    'No IMAP greeting from %s:%d within 0.3s (encryption=StartTls).',
+                    $server->host(),
+                    $server->port(),
+                ) . ' The server accepted the TCP connection but never sent a plaintext "* OK ..." line.'
+                    . ' This usually means the port is implicit-TLS — try Encryption::Tls.';
+                self::assertSame($expected, $e->getMessage());
                 self::assertInstanceOf(
                     \D4ry\ImapClient\Exception\TimeoutException::class,
                     $e->getPrevious(),
                 );
+            }
+        } finally {
+            $server->reap($pid);
+            $server->stop();
+        }
+    }
+
+    public function testConnectFailsFastWithEncryptionHintWhenNoneServerNeverSendsGreeting(): void
+    {
+        // Same as the StartTls variant but with Encryption::None — kills the
+        // MatchArmRemoval mutant that splits the `Encryption::StartTls,
+        // Encryption::None` arm by ensuring BOTH inputs produce the hint.
+        if (!function_exists('pcntl_fork')) {
+            self::markTestSkipped('pcntl extension required');
+        }
+
+        $server = new LoopbackServer();
+        $server->start('plain');
+
+        $pid = $server->forkAccept(function ($peer): void {
+            usleep(500_000);
+        });
+
+        try {
+            $config = new Config(
+                host: $server->host(),
+                credential: new LoginCredential('user', 'pass'),
+                port: $server->port(),
+                encryption: Encryption::None,
+                timeout: 5.0,
+                greetingTimeout: 0.3,
+            );
+
+            try {
+                Mailbox::connect($config);
+                self::fail('Expected ConnectionException');
+            } catch (ConnectionException $e) {
+                $expected = sprintf(
+                    'No IMAP greeting from %s:%d within 0.3s (encryption=None).',
+                    $server->host(),
+                    $server->port(),
+                ) . ' The server accepted the TCP connection but never sent a plaintext "* OK ..." line.'
+                    . ' This usually means the port is implicit-TLS — try Encryption::Tls.';
+                self::assertSame($expected, $e->getMessage());
             }
         } finally {
             $server->reap($pid);
@@ -863,9 +935,17 @@ final class MailboxTest extends TestCase
                 Mailbox::connect($config);
                 self::fail('Expected ConnectionException');
             } catch (ConnectionException $e) {
-                self::assertStringContainsString('No IMAP greeting from', $e->getMessage());
-                self::assertStringContainsString('encryption=Tls', $e->getMessage());
-                self::assertStringContainsString('try Encryption::StartTls', $e->getMessage());
+                // Pin the exact full hint message — kills the Concat /
+                // ConcatOperandRemoval mutants on the Tls branch of
+                // buildGreetingTimeoutHint().
+                $expected = sprintf(
+                    'No IMAP greeting from %s:%d within 0.3s (encryption=Tls).',
+                    $server->host(),
+                    $server->port(),
+                ) . ' The TLS handshake completed but the server never sent an IMAP greeting.'
+                    . ' The port may not be implicit-TLS — try Encryption::StartTls or Encryption::None,'
+                    . ' or check that the port actually speaks IMAP.';
+                self::assertSame($expected, $e->getMessage());
                 self::assertInstanceOf(
                     \D4ry\ImapClient\Exception\TimeoutException::class,
                     $e->getPrevious(),
@@ -948,6 +1028,31 @@ final class MailboxTest extends TestCase
             self::assertInstanceOf(Mailbox::class, $live);
             self::assertFileExists($recordPath);
             self::assertGreaterThan(0, filesize($recordPath));
+
+            // Inspect the captured wire writes to assert the connect-time
+            // ENABLE and ID lines were exactly what we expect. This pins
+            // the byte format of both commands and kills the
+            // NotIdentical / LogicalAnd / MethodCallRemoval mutants on the
+            // ENABLE block (line 138-139) and reinforces the byte-format
+            // assertions for the connect-time ID block (line 143-149).
+            $writes = [];
+            foreach (file($recordPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
+                $event = json_decode($line, true, flags: JSON_THROW_ON_ERROR);
+                if (($event['t'] ?? null) === 'write') {
+                    $writes[] = $event['data'];
+                }
+            }
+            $writeBlob = implode('', $writes);
+            self::assertStringContainsString(
+                "ENABLE CONDSTORE QRESYNC UTF8=ACCEPT\r\n",
+                $writeBlob,
+                'connect handshake must send the exact ENABLE line for the requested extensions',
+            );
+            self::assertStringContainsString(
+                "ID (\"name\" \"TestClient\")\r\n",
+                $writeBlob,
+                'connect handshake must send the exact ID line for the configured clientId',
+            );
 
             // 2. Replay against the captured fixture — no network, no server.
             //    The Config's host/port/encryption/timeout/sslOptions are

@@ -114,10 +114,16 @@ final class XOAuth2CredentialTest extends TestCase
 
         $connection->queueLines('A0001 NO Token expired');
 
-        $this->expectException(AuthenticationException::class);
-        $this->expectExceptionMessage('XOAUTH2 authentication failed: Token expired');
-
-        (new XOAuth2Credential('u@example.com', 'tok'))->authenticate($transceiver);
+        try {
+            (new XOAuth2Credential('u@example.com', 'tok'))->authenticate($transceiver);
+            self::fail('Expected AuthenticationException');
+        } catch (AuthenticationException $e) {
+            // Exact message + code assertions kill Concat, ConcatOperandRemoval
+            // and Increment/Decrement mutants on the XOAUTH2 final-throw line.
+            self::assertSame('XOAUTH2 authentication failed: Token expired', $e->getMessage());
+            self::assertSame(0, $e->getCode());
+            self::assertInstanceOf(CommandException::class, $e->getPrevious());
+        }
     }
 
     public function testAuthenticateContinuationFlowHappyPath(): void
@@ -169,10 +175,16 @@ final class XOAuth2CredentialTest extends TestCase
             }
         };
 
-        $this->expectException(AuthenticationException::class);
-        $this->expectExceptionMessage('after token refresh');
-
-        (new XOAuth2Credential('u@example.com', 'tok', $refresher))->authenticate($transceiver);
+        try {
+            (new XOAuth2Credential('u@example.com', 'tok', $refresher))->authenticate($transceiver);
+            self::fail('Expected AuthenticationException');
+        } catch (AuthenticationException $e) {
+            // Exact message + code assertions kill Concat, ConcatOperandRemoval
+            // and Increment/Decrement mutants on the XOAUTH2 post-refresh-throw.
+            self::assertSame('XOAUTH2 authentication failed after token refresh: Still bad', $e->getMessage());
+            self::assertSame(0, $e->getCode());
+            self::assertInstanceOf(CommandException::class, $e->getPrevious());
+        }
     }
 
     /**

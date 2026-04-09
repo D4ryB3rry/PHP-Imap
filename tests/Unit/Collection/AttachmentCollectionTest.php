@@ -36,12 +36,24 @@ final class AttachmentCollectionTest extends TestCase
 
     public function testInlineFilter(): void
     {
+        // To kill the UnwrapArrayValues mutant on BOTH inline() and
+        // nonInline(), the surviving element must end up at a non-zero
+        // index in the post-filter result. We need TWO orderings — one
+        // where the inline survives at a non-zero index (regular first),
+        // and one where the non-inline survives at a non-zero index
+        // (inline first).
         $regular = $this->makeAttachment(false);
-        $inline = $this->makeAttachment(true);
-        $collection = new AttachmentCollection([$regular, $inline]);
+        $inline  = $this->makeAttachment(true);
 
-        self::assertSame([$inline], $collection->inline()->toArray());
-        self::assertSame([$regular], $collection->nonInline()->toArray());
+        // Order #1: regular first, inline at index 1 — kills inline()'s
+        // array_values wrapper.
+        $a = new AttachmentCollection([$regular, $inline]);
+        self::assertSame([0 => $inline], $a->inline()->toArray());
+
+        // Order #2: inline first, regular at index 1 — kills nonInline()'s
+        // array_values wrapper.
+        $b = new AttachmentCollection([$inline, $regular]);
+        self::assertSame([0 => $regular], $b->nonInline()->toArray());
     }
 
     public function testEmptyCollection(): void

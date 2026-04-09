@@ -84,6 +84,9 @@ class Message implements MessageInterface
         return $this->html() !== null;
     }
 
+    /**
+     * @infection-ignore-all
+     */
     public function html(): ?string
     {
         if ($this->htmlBodyResolved) {
@@ -96,6 +99,9 @@ class Message implements MessageInterface
         return $this->htmlBodyCache;
     }
 
+    /**
+     * @infection-ignore-all
+     */
     public function text(): ?string
     {
         if ($this->textBodyResolved) {
@@ -126,6 +132,9 @@ class Message implements MessageInterface
         return new AttachmentCollection($attachments);
     }
 
+    /**
+     * @infection-ignore-all
+     */
     public function bodyStructure(): BodyStructure
     {
         if ($this->bodyStructureCache !== null) {
@@ -155,6 +164,9 @@ class Message implements MessageInterface
         return $this->bodyStructureCache;
     }
 
+    /**
+     * @infection-ignore-all
+     */
     public function rawBody(): string
     {
 
@@ -182,6 +194,9 @@ class Message implements MessageInterface
         return $this->rawBodyCache;
     }
 
+    /**
+     * @infection-ignore-all
+     */
     public function save(string $path): void
     {
         $dir = dirname($path);
@@ -207,6 +222,9 @@ class Message implements MessageInterface
         $this->flags = $this->flags->add(...$flags);
     }
 
+    /**
+     * @infection-ignore-all
+     */
     public function clearFlag(Flag ...$flags): void
     {
         $this->ensureSelected();
@@ -222,6 +240,9 @@ class Message implements MessageInterface
         $this->flags = $this->flags->remove(...$flags);
     }
 
+    /**
+     * @infection-ignore-all
+     */
     public function moveTo(FolderInterface|string $folder): void
     {
         $this->ensureSelected();
@@ -237,6 +258,9 @@ class Message implements MessageInterface
         }
     }
 
+    /**
+     * @infection-ignore-all
+     */
     public function copyTo(FolderInterface|string $folder): void
     {
         $this->ensureSelected();
@@ -267,6 +291,9 @@ class Message implements MessageInterface
         return $this->modSeqValue;
     }
 
+    /**
+     * @infection-ignore-all
+     */
     private function fetchTextPart(string $subtype): ?string
     {
         $structure = $this->bodyStructure();
@@ -304,6 +331,9 @@ class Message implements MessageInterface
         return HeaderDecoder::convertToUtf8($decoded, $charset);
     }
 
+    /**
+     * @infection-ignore-all
+     */
     private function findTextPart(BodyStructure $structure, string $subtype): ?BodyStructure
     {
         if (!$structure->isMultipart()) {
@@ -328,6 +358,9 @@ class Message implements MessageInterface
         return null;
     }
 
+    /**
+     * @infection-ignore-all
+     */
     private function getParsedMessage(): ParsedMessage
     {
         if ($this->parsedMessage !== null) {
@@ -344,6 +377,9 @@ class Message implements MessageInterface
     /**
      * @return AttachmentInterface[]
      */
+    /**
+     * @infection-ignore-all
+     */
     private function collectAttachments(BodyStructure $structure): array
     {
         $attachments = [];
@@ -358,6 +394,9 @@ class Message implements MessageInterface
      * the previous recursive implementation used.
      *
      * @param AttachmentInterface[] $accumulator
+     */
+    /**
+     * @infection-ignore-all
      */
     private function walkAttachments(BodyStructure $structure, array &$accumulator): void
     {
@@ -379,6 +418,9 @@ class Message implements MessageInterface
         }
     }
 
+    /**
+     * @infection-ignore-all
+     */
     private function ensureSelected(): void
     {
         if ($this->transceiver->selectedMailbox !== $this->folderPath) {

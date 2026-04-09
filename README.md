@@ -2,6 +2,7 @@
 
 [![Tests](https://github.com/D4ryB3rry/PHP-Imap-/actions/workflows/tests.yml/badge.svg)](https://github.com/D4ryB3rry/PHP-Imap-/actions/workflows/tests.yml)
 [![codecov](https://codecov.io/gh/D4ryB3rry/PHP-Imap/graph/badge.svg?token=07Z3M6IDRR)](https://codecov.io/gh/D4ryB3rry/PHP-Imap)
+[![Mutation testing badge](https://img.shields.io/endpoint?style=flat&url=https%3A%2F%2Fbadge-api.stryker-mutator.io%2Fgithub.com%2FD4ryB3rry%2FPHP-Imap%2Fmain)](https://dashboard.stryker-mutator.io/reports/github.com/D4ryB3rry/PHP-Imap/main)
 [![Packagist Version](https://img.shields.io/packagist/v/d4ry/imap-client)](https://packagist.org/packages/d4ry/imap-client)
 [![Packagist Downloads](https://img.shields.io/packagist/dt/d4ry/imap-client)](https://packagist.org/packages/d4ry/imap-client/stats)
 ![License Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue)

@@ -49,6 +49,21 @@ final class BodyStructureTest extends TestCase
         self::assertTrue($bs->isAttachment());
     }
 
+    public function testFilenameDispositionFilenameTakesPrecedenceOverParameterName(): void
+    {
+        // Both fields populated → dispositionFilename must win. Kills the
+        // Coalesce mutant on BodyStructure::filename() that swaps the
+        // operand order of the `??` chain.
+        $bs = new BodyStructure(
+            type: 'IMAGE',
+            subtype: 'PNG',
+            parameters: ['name' => 'inline-name.png'],
+            dispositionFilename: 'attachment-name.png',
+        );
+
+        self::assertSame('attachment-name.png', $bs->filename());
+    }
+
     public function testInlineWithContentId(): void
     {
         $bs = new BodyStructure(

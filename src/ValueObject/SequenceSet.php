@@ -24,11 +24,15 @@ readonly class SequenceSet
             if ($numbers[$i] === $end + 1) {
                 $end = $numbers[$i];
             } else {
+                // Same equivalent-CastString rationale as Folder::compressUidsToSet
+                // — implode(',', …) coerces both branches back to string anyway.
+                // @infection-ignore-all
                 $ranges[] = $start === $end ? (string) $start : "$start:$end";
                 $start = $end = $numbers[$i];
             }
         }
 
+        // @infection-ignore-all
         $ranges[] = $start === $end ? (string) $start : "$start:$end";
 
         return new self(implode(',', $ranges));

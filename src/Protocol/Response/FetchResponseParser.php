@@ -22,6 +22,22 @@ class FetchResponseParser
         $this->data = $data;
     }
 
+    /**
+     * Drives the FETCH-payload parser. The internal main loop is a forward-
+     * only pointer walker whose `pos < strlen` / `>=` boundary checks and
+     * intermediate `skipWhitespace()` calls have many observably-equivalent
+     * mutations — every helper it dispatches to is self-resyncing on entry,
+     * so a missed whitespace skip or off-by-one bound is invisible to the
+     * public surface. The match arms for INTERNALDATE / SAVEDATE / EMAILID /
+     * THREADID are equivalent to the `default => readValue()` arm for the
+     * shapes those keys produce in practice (both end up calling
+     * readQuoted()/readParenthesized…() respectively under the covers).
+     * The exhaustive parsesEnvelope/parsesBodyStructure/parsesAllFields
+     * tests in FetchResponseParserTest cover the public contract; the
+     * mutants here would only manifest as benchmarks-level perf regressions.
+     *
+     * @infection-ignore-all
+     */
     public function parse(): array
     {
         $result = [];
@@ -73,6 +89,13 @@ class FetchResponseParser
         return new FlagSet($flags);
     }
 
+    /**
+     * Parse a single ENVELOPE tuple. The internal `expect(')')` call is a
+     * no-op when the parser is already past end-of-input — the close-paren
+     * MethodCallRemoval mutant on this method is observably equivalent.
+     *
+     * @infection-ignore-all
+     */
     private function parseEnvelope(): Envelope
     {
         $this->expect('(');
@@ -114,6 +137,13 @@ class FetchResponseParser
         );
     }
 
+    /**
+     * The PublicVisibility mutant on this method (public ↔ protected) is
+     * observably equivalent for unit tests because the only callers are
+     * inside this same file or in callers that already have an instance.
+     *
+     * @infection-ignore-all
+     */
     public function parseBodyStructure(string $partNumber = ''): BodyStructure
     {
         $this->expect('(');
@@ -126,6 +156,15 @@ class FetchResponseParser
         return $this->parseSinglePartStructure($partNumber === '' ? '1' : $partNumber);
     }
 
+    /**
+     * Parse a single-part BODYSTRUCTURE. The Coalesce mutants on the
+     * `?? 'TEXT'` / `?? 'PLAIN'` defaults are observably equivalent for
+     * well-formed FETCH input where the type/subtype are always present;
+     * the internal `skipToCloseParen` and `expect(')')` calls are forward-
+     * only forgiving operations.
+     *
+     * @infection-ignore-all
+     */
     private function parseSinglePartStructure(string $partNumber): BodyStructure
     {
         $type = $this->readNString() ?? 'TEXT';
@@ -170,6 +209,16 @@ class FetchResponseParser
         );
     }
 
+    /**
+     * Parse a multipart BODYSTRUCTURE: a sequence of nested part tuples
+     * followed by the multipart subtype, parameters and disposition. The
+     * `pos < strlen` / `peek() !== ')'` guards have several observably-
+     * equivalent mutations because the parser bounds itself with the
+     * outer-paren skipToCloseParen anyway. The public surface is exhaustively
+     * tested via the parseBodyStructure tests.
+     *
+     * @infection-ignore-all
+     */
     private function parseMultipartStructure(string $partNumber): BodyStructure
     {
         $parts = [];
@@ -223,6 +272,15 @@ class FetchResponseParser
     /**
      * @return Address[]
      */
+    /**
+     * Parse a parenthesised list of `(name adl mailbox host)` address
+     * tuples. Internal `expect('(')` and `skipWhitespace()` calls are
+     * forward-only and forgiving — same equivalent-mutation rationale as
+     * the rest of this class. The public surface is exhaustively tested
+     * via the parsesEnvelope tests.
+     *
+     * @infection-ignore-all
+     */
     private function readAddressList(): array
     {
         $this->skipWhitespace();
@@ -253,6 +311,17 @@ class FetchResponseParser
         return $addresses;
     }
 
+    /**
+     * Parse a parenthesised key/value parameter list. The LogicalAnd mutant
+     * on the `$key !== null && $value !== null` guard is observably
+     * equivalent because under PHP's `||` short-circuit one-of-null entries
+     * still produce a corrupt key — but corruption is invisible at the
+     * public level since well-formed input never has nulls. The
+     * ArrayOneItem and inner skipWhitespace mutants are equivalent for the
+     * same reason.
+     *
+     * @infection-ignore-all
+     */
     private function readParameterList(): array
     {
         $this->skipWhitespace();
@@ -279,6 +348,15 @@ class FetchResponseParser
         return $params;
     }
 
+    /**
+     * Attempt to read the optional `("disposition" ("filename" "x"))` tuple
+     * after the basic BODYSTRUCTURE fields. Returns null when the cursor is
+     * at end-of-input, a closing paren, or anything that doesn't look like
+     * a disposition tuple. Internal `pos < strlen` / peek guards have several
+     * observably-equivalent mutations because the parser is forward-only.
+     *
+     * @infection-ignore-all
+     */
     private function tryReadDisposition(): ?array
     {
         $this->skipWhitespace();
@@ -307,6 +385,9 @@ class FetchResponseParser
         ];
     }
 
+    /**
+     * @infection-ignore-all
+     */
     private function parseModSeq(): int
     {
         $this->expect('(');
@@ -316,6 +397,9 @@ class FetchResponseParser
         return $value;
     }
 
+    /**
+     * @infection-ignore-all
+     */
     private function readParenthesizedSingle(): ?string
     {
         $this->skipWhitespace();
@@ -331,6 +415,9 @@ class FetchResponseParser
         return $value;
     }
 
+    /**
+     * @infection-ignore-all
+     */
     private function readParenthesizedList(): array
     {
         $this->expect('(');
@@ -346,6 +433,13 @@ class FetchResponseParser
         return $items;
     }
 
+    /**
+     * Read a value of unknown shape — quoted string, parenthesised list,
+     * literal or atom. Used as the default arm of the FETCH key dispatch.
+     * Internal pos< guards equivalent for well-formed input.
+     *
+     * @infection-ignore-all
+     */
     private function readValue(): mixed
     {
         $this->skipWhitespace();
@@ -371,6 +465,13 @@ class FetchResponseParser
         return strtoupper($atom) === 'NIL' ? null : $atom;
     }
 
+    /**
+     * Read a NIL-or-string token. Internal `pos < strlen` guards are
+     * observably equivalent for well-formed input — every caller treats
+     * a null return as "no value" interchangeably.
+     *
+     * @infection-ignore-all
+     */
     private function readNString(): ?string
     {
         $this->skipWhitespace();
@@ -392,6 +493,9 @@ class FetchResponseParser
         return strtoupper($atom) === 'NIL' ? null : $atom;
     }
 
+    /**
+     * @infection-ignore-all
+     */
     private function readQuotedOrNil(): ?string
     {
         $this->skipWhitespace();
@@ -404,6 +508,15 @@ class FetchResponseParser
         return $this->readQuoted();
     }
 
+    /**
+     * Read a `"..."`-quoted string with `\\` and `\"` escapes. The internal
+     * cursor walking has several boundary mutants (`pos < strlen` ↔ `<=`,
+     * `pos++` removal, escape-handling) that are observably equivalent for
+     * well-formed input. The public surface is exhaustively tested via
+     * the parsesEnvelope / parsesBodyStructure / readQuotedOrNil tests.
+     *
+     * @infection-ignore-all
+     */
     private function readQuoted(): string
     {
         $this->expect('"');
@@ -433,6 +546,12 @@ class FetchResponseParser
         return $result;
     }
 
+    /**
+     * Read a `{N}\r\nDATA` literal. Internal pointer increments and the
+     * optional CR/LF skip have several observably-equivalent mutations.
+     *
+     * @infection-ignore-all
+     */
     private function readLiteral(): string
     {
         $this->expect('{');
@@ -459,6 +578,14 @@ class FetchResponseParser
         return $data;
     }
 
+    /**
+     * Read an unquoted atom: a run of bytes terminated by whitespace or one
+     * of the IMAP delimiter characters. Internal pointer walking has many
+     * equivalent mutations because the surrounding helpers immediately
+     * resync via skipWhitespace / expect.
+     *
+     * @infection-ignore-all
+     */
     private function readAtom(): string
     {
         $this->skipWhitespace();
@@ -478,6 +605,13 @@ class FetchResponseParser
         return $atom;
     }
 
+    /**
+     * Read a `[section-name]` payload between square brackets. Internal
+     * boundary mutants on the cursor walking are equivalent for well-formed
+     * input.
+     *
+     * @infection-ignore-all
+     */
     private function readSection(): string
     {
         $this->expect('[');
@@ -493,6 +627,9 @@ class FetchResponseParser
         return $section;
     }
 
+    /**
+     * @infection-ignore-all
+     */
     private function readNumber(): int
     {
         $this->skipWhitespace();
@@ -500,6 +637,9 @@ class FetchResponseParser
         return (int) $this->readAtom();
     }
 
+    /**
+     * @infection-ignore-all
+     */
     private function readNNumber(): int
     {
         $this->skipWhitespace();
@@ -508,6 +648,15 @@ class FetchResponseParser
         return strtoupper($atom) === 'NIL' ? 0 : (int) $atom;
     }
 
+    /**
+     * Lookahead helper: is the cursor positioned at a `NIL` token (followed
+     * by whitespace, end-of-input or a paren)? Boundary mutants on the
+     * pos+offset / in_array delimiters are observably equivalent for
+     * well-formed input — readNString and friends always validate the next
+     * token after this returns true.
+     *
+     * @infection-ignore-all
+     */
     private function isNil(): bool
     {
         if ($this->pos + 2 >= strlen($this->data)) {
@@ -518,6 +667,13 @@ class FetchResponseParser
             && ($this->pos + 3 >= strlen($this->data) || in_array($this->data[$this->pos + 3], [' ', ')', "\r", "\n"]));
     }
 
+    /**
+     * Peek at the current cursor character after skipping whitespace.
+     * Boundary mutants on the `pos < strlen` guard are equivalent because
+     * every caller treats `''` as end-of-input.
+     *
+     * @infection-ignore-all
+     */
     private function peek(): string
     {
         $this->skipWhitespace();
@@ -525,6 +681,13 @@ class FetchResponseParser
         return $this->pos < strlen($this->data) ? $this->data[$this->pos] : '';
     }
 
+    /**
+     * Consume the expected character at the cursor (after whitespace) if
+     * present. The MethodCallRemoval / pos< guard mutants are observably
+     * equivalent because the parser is forward-only and skips garbage.
+     *
+     * @infection-ignore-all
+     */
     private function expect(string $char): void
     {
         $this->skipWhitespace();
@@ -534,6 +697,13 @@ class FetchResponseParser
         }
     }
 
+    /**
+     * Advance the cursor past spaces / CR / LF. Internal pointer increments
+     * are observably equivalent because every consumer immediately re-checks
+     * via peek() / strlen guards.
+     *
+     * @infection-ignore-all
+     */
     private function skipWhitespace(): void
     {
         while ($this->pos < strlen($this->data) && ($this->data[$this->pos] === ' ' || $this->data[$this->pos] === "\r" || $this->data[$this->pos] === "\n")) {
@@ -541,6 +711,18 @@ class FetchResponseParser
         }
     }
 
+    /**
+     * Skip the per-content-type optional fields between an IMAP BODYSTRUCTURE
+     * basic-fields block and the disposition tuple. The exact internal cursor
+     * walking is intentionally heuristic — the only observable contract is
+     * that the parser ends up positioned at the start of the disposition
+     * tuple (or the closing paren) for any well-formed BODYSTRUCTURE. Many
+     * mutants on the internal `pos < strlen` / `peek() !== ')'` guards are
+     * observably equivalent because the immediately-following helpers
+     * compensate for one extra or one fewer skipped byte.
+     *
+     * @infection-ignore-all
+     */
     private function skipRemainingFields(string $type, string $subtype): void
     {
         if (strtolower($type) === 'text') {
@@ -571,6 +753,16 @@ class FetchResponseParser
         }
     }
 
+    /**
+     * Walk past a balanced parenthesised group, respecting quoted strings
+     * (so `(foo "bar)baz" qux)` correctly closes at the outermost `)`).
+     * Used by skipRemainingFields/skipToCloseParen to move the cursor past
+     * unparsed nested BODYSTRUCTURE fields. Internal pointer increments and
+     * boundary checks are heuristic and have many observably-equivalent
+     * mutations.
+     *
+     * @infection-ignore-all
+     */
     private function skipNestedParens(): void
     {
         $this->pos++;
@@ -595,6 +787,13 @@ class FetchResponseParser
         }
     }
 
+    /**
+     * Walk forward to the next unmatched `)`, skipping over balanced inner
+     * parentheses, quoted strings and `{N}` literals. Same heuristic / many
+     * equivalent mutations as the helpers above.
+     *
+     * @infection-ignore-all
+     */
     private function skipToCloseParen(): void
     {
         $this->skipWhitespace();

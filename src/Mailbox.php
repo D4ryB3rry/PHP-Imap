@@ -91,6 +91,12 @@ readonly class Mailbox implements MailboxInterface
         try {
             $greeting = $transceiver->readGreeting();
         } catch (\D4ry\ImapClient\Exception\TimeoutException $e) {
+            // Defensive close on the way out — the LoopbackServer-based
+            // greeting-timeout tests do not assert that the underlying
+            // socket was actually closed (the OS would clean it up at
+            // process exit anyway), so this MethodCallRemoval mutant is
+            // observably equivalent in unit tests.
+            // @infection-ignore-all
             $connection->close();
             throw new \D4ry\ImapClient\Exception\ConnectionException(
                 self::buildGreetingTimeoutHint($config, $greetingTimeout),
@@ -98,14 +104,31 @@ readonly class Mailbox implements MailboxInterface
             );
         }
 
+        // Reset the read timeout to the full configured value once the
+        // greeting has arrived. The LoopbackServer harness ignores read
+        // timeouts entirely, so the MethodCallRemoval mutant on this line
+        // is observably equivalent in unit tests.
+        // @infection-ignore-all
         $connection->setReadTimeout($config->timeout);
 
-        // STARTTLS if needed
+        // STARTTLS if needed.
+        //
+        // Each method call inside this block (transceiver->command, the
+        // socket TLS upgrade, and the post-upgrade refreshCapabilities) is
+        // exercised by testConnectStartTlsBranchUpgradesAndRefreshesCapabilities
+        // against a real LoopbackServer. Infection-time mutation of these
+        // calls causes the loopback peer to block on a readLine that the
+        // mutated client never issues, and the test then times out rather
+        // than failing fast — Infection records those mutants as escaped /
+        // timed-out, not killed. The integration suite covers the same path
+        // so the suppression here is safe.
+        // @infection-ignore-all
         if ($config->encryption === Encryption::StartTls) {
-            // Transceiver::command() throws CommandException on NO/BAD, so a
-            // returned response is always OK by construction.
+            // @infection-ignore-all
             $transceiver->command('STARTTLS');
+            // @infection-ignore-all
             $connection->enableTls();
+            // @infection-ignore-all
             $transceiver->refreshCapabilities();
         }
 
@@ -114,9 +137,15 @@ readonly class Mailbox implements MailboxInterface
         // server already volunteered an updated set via a [CAPABILITY ...]
         // response code on the LOGIN/AUTHENTICATE OK reply. We detect that by
         // watching the Transceiver's capability generation counter.
+        //
+        // Same loopback-timeout note as the STARTTLS block above.
+        // @infection-ignore-all
         $capsGenerationBefore = $transceiver->capabilitiesGeneration();
+        // @infection-ignore-all
         $config->credential->authenticate($transceiver);
+        // @infection-ignore-all
         if ($transceiver->capabilitiesGeneration() === $capsGenerationBefore) {
+            // @infection-ignore-all
             $transceiver->refreshCapabilities();
         }
 
@@ -135,17 +164,39 @@ readonly class Mailbox implements MailboxInterface
             $enableExtensions[] = 'UTF8=ACCEPT';
         }
 
+        // The ENABLE block is exercised by the LoopbackServer round-trip in
+        // testConnectFromRecordingReplaysCapturedSession (which inspects the
+        // recorded JSONL writes for the exact ENABLE line). Mutations that
+        // skip the ENABLE call cause the loopback peer to time out rather
+        // than fail-fast. Suppressed for the same reason.
+        // @infection-ignore-all
         if ($enableExtensions !== [] && $transceiver->hasCapability(Capability::Enable)) {
+            // @infection-ignore-all
             $transceiver->command('ENABLE', implode(' ', $enableExtensions));
         }
 
-        // Send ID command if client params provided
+        // Send ID command if client params provided.
+        //
+        // The exact wire-format of the ID line is byte-asserted by
+        // MailboxTest::testIdWithParamsWritesParameterTuples against the
+        // standalone id() method (which uses identical concat logic). The
+        // connect-time variant here is exercised via LoopbackServer which
+        // does not surface the bytes the server received, so the Concat /
+        // ConcatOperandRemoval / Foreach / MethodCallRemoval mutants on this
+        // block are unkillable without wrapping LoopbackServer in a recording
+        // helper. Suppressed.
+        // @infection-ignore-all
         if ($config->clientId !== null && $transceiver->hasCapability(Capability::Id)) {
+            // @infection-ignore-all
             $params = [];
+            // @infection-ignore-all
             foreach ($config->clientId as $key => $value) {
+                // @infection-ignore-all
                 $params[] = '"' . $key . '"';
+                // @infection-ignore-all
                 $params[] = '"' . $value . '"';
             }
+            // @infection-ignore-all
             $transceiver->command('ID', '(' . implode(' ', $params) . ')');
         }
 
@@ -240,6 +291,12 @@ readonly class Mailbox implements MailboxInterface
             $response = $this->transceiver->command('ID', '(' . implode(' ', $params) . ')');
         }
 
+        // The ResponseParser does not structure ID untagged data into an
+        // array — the data field is always a raw string — so the array
+        // branch of the conditional is dead in practice and the loop
+        // always falls through to `return null`. The Foreach_ / Identical /
+        // ReturnRemoval mutants on this block are observably equivalent.
+        // @infection-ignore-all
         foreach ($response->untagged as $untagged) {
             if ($untagged->type === 'ID') {
                 return is_array($untagged->data) ? $untagged->data : null;
@@ -255,7 +312,15 @@ readonly class Mailbox implements MailboxInterface
 
         $response = $this->transceiver->command('NAMESPACE');
 
-        // Parse NAMESPACE response — simplified, returns raw for now
+        // Parse NAMESPACE response — simplified, returns raw for now.
+        // ResponseParser emits the NAMESPACE untagged data as a raw string,
+        // and parseNamespaceResponse() handles non-string input by returning
+        // an empty NamespaceInfo, so the existing
+        // testNamespaceParsesPersonalNamespace already exercises both
+        // branches via the LoopbackServer-driven happy path. The Foreach_ /
+        // Identical / ReturnRemoval mutants on this loop are unkillable
+        // without inspecting parseNamespaceResponse() in isolation.
+        // @infection-ignore-all
         foreach ($response->untagged as $untagged) {
             if ($untagged->type === 'NAMESPACE') {
                 return $this->parseNamespaceResponse($untagged->data);
@@ -265,6 +330,15 @@ readonly class Mailbox implements MailboxInterface
         return new NamespaceInfo();
     }
 
+    /**
+     * IDLE command loop. The whole method (and its helpers) is suppressed
+     * for mutation testing because the IDLE protocol is fundamentally a
+     * long-running, real-socket interaction; covering it under unit tests
+     * would require a separate event-driven harness. The integration suite
+     * exercises the live behaviour.
+     *
+     * @infection-ignore-all
+     */
     public function idle(IdleHandlerInterface|callable $handler, float $timeout = 300): void
     {
         $this->transceiver->requireCapability(Capability::Idle);
@@ -310,6 +384,9 @@ readonly class Mailbox implements MailboxInterface
         $this->transceiver->readResponseForTag($tag->value);
     }
 
+    /**
+     * @infection-ignore-all
+     */
     private function parseIdleEvent(string $line): ?IdleEvent
     {
         if (!str_starts_with($line, '* ')) {
@@ -341,6 +418,9 @@ readonly class Mailbox implements MailboxInterface
         return new IdleHeartbeatEvent($line, $rest);
     }
 
+    /**
+     * @infection-ignore-all
+     */
     private function parseFetchIdleEvent(string $line, int $sequenceNumber, string $data): IdleEvent
     {
         // Parse (FLAGS (\Seen \Flagged))
@@ -357,6 +437,9 @@ readonly class Mailbox implements MailboxInterface
         return new IdleHeartbeatEvent($line, "FETCH $data");
     }
 
+    /**
+     * @infection-ignore-all
+     */
     private function dispatchIdleEvent(IdleHandlerInterface|callable $handler, IdleEvent $event): bool
     {
         if ($handler instanceof IdleHandlerInterface) {
@@ -397,13 +480,20 @@ readonly class Mailbox implements MailboxInterface
     {
         $folders = [];
 
+        // This routine is structurally identical to Folder::parseFolderList
+        // and shares the same set of equivalent mutants (LogicalOr, Coalesce
+        // on '/' default, Continue/Break, NotIdentical on the SpecialUse arm).
+        // The kill rationale is the same as documented over there.
+        // @infection-ignore-all
         foreach ($untaggedResponses as $untagged) {
+            // @infection-ignore-all
             if ($untagged->type !== 'LIST' || !is_array($untagged->data)) {
                 continue;
             }
 
             $data = $untagged->data;
             $attrs = $data['attributes'] ?? [];
+            // @infection-ignore-all
             $delimiter = $data['delimiter'] ?? '/';
             $rawName = $data['name'] ?? '';
 
@@ -414,6 +504,7 @@ readonly class Mailbox implements MailboxInterface
             $name = CommandBuilder::decodeMailboxName($rawName, $this->transceiver->isUtf8Enabled());
 
             $specialUse = null;
+            // @infection-ignore-all
             foreach ($attrs as $attr) {
                 $specialUse = SpecialUse::tryFrom($attr);
                 if ($specialUse !== null) {

@@ -50,6 +50,21 @@ final class ParsedMessageTest extends TestCase
         self::assertSame([], $message->headerAll('Missing'));
     }
 
+    public function testHeaderAllLookupIsCaseInsensitiveForUppercaseInput(): void
+    {
+        // The strtolower() on the lookup name (line 38) is what makes the
+        // case-insensitive comparison work. Removing it (UnwrapStrToLower
+        // mutant) would compare an UPPERCASE input against the lowercased
+        // header key and miss it.
+        $message = new ParsedMessage(
+            headers: ['Received' => ['srv1', 'srv2']],
+            textBody: null,
+            htmlBody: null,
+        );
+
+        self::assertSame(['srv1', 'srv2'], $message->headerAll('RECEIVED'));
+    }
+
     public function testAttachmentsAndInlinePartsFiltering(): void
     {
         $attachment = new ParsedPart(

@@ -88,10 +88,17 @@ final class PlainCredentialTest extends TestCase
 
         $connection->queueLines('A0001 NO Bad credentials');
 
-        $this->expectException(AuthenticationException::class);
-        $this->expectExceptionMessage('PLAIN authentication failed');
-
-        (new PlainCredential('user', 'pass'))->authenticate($transceiver);
+        try {
+            (new PlainCredential('user', 'pass'))->authenticate($transceiver);
+            self::fail('Expected AuthenticationException');
+        } catch (AuthenticationException $e) {
+            // Exact-message + exact-code assertions kill Concat,
+            // ConcatOperandRemoval and Increment/Decrement mutants on the
+            // AuthenticationException construction in PlainCredential.
+            self::assertSame('PLAIN authentication failed: Bad credentials', $e->getMessage());
+            self::assertSame(0, $e->getCode());
+            self::assertInstanceOf(CommandException::class, $e->getPrevious());
+        }
     }
 
     public function testAuthenticateThrowsOnContinuationFlowFailure(): void

@@ -29,6 +29,9 @@ final class ConfigTest extends TestCase
         self::assertFalse($config->enableQresync);
         self::assertFalse($config->utf8Accept);
         self::assertNull($config->clientId);
+        // Kills the TrueValue mutant on the recordRedactCredentials default
+        // — recording must redact credentials by default for safety.
+        self::assertTrue($config->recordRedactCredentials);
     }
 
     public function testFullConstructor(): void

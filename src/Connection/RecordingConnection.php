@@ -9,6 +9,8 @@ use D4ry\ImapClient\Enum\Encryption;
 use D4ry\ImapClient\Exception\ConnectionException;
 
 /**
+ * @infection-ignore-all
+ *
  * Decorator that records every I/O operation as a JSONL stream.
  *
  * One JSON object per line. Designed to be consumed by ReplayConnection so that

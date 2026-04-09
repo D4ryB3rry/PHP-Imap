@@ -41,6 +41,106 @@ final class CommandBuilderTest extends TestCase
         self::assertSame('"a\\\\b\\"c"', CommandBuilder::quoteString('a\\b"c'));
     }
 
+    public function testQuoteStringEscapesBothBackslashAndQuoteOnControlPath(): void
+    {
+        // Input contains a control character (NUL) which forces the
+        // first-branch quote path; the input also contains both `\` and `"`
+        // which exercises both str_replace pairs. Kills the
+        // ArrayItemRemoval / UnwrapStrReplace mutants on line 102.
+        $input = "\x00\\\"";
+        $expected = "\"\x00\\\\\\\"\"";
+        self::assertSame($expected, CommandBuilder::quoteString($input));
+    }
+
+    public function testQuoteStringEscapesBothBackslashAndQuoteOnFallbackPath(): void
+    {
+        // Plain ASCII with a space — fails the atom-charset regex on line
+        // 107, falls through to the second str_replace on line 111. The
+        // input contains both `\` and `"` to exercise both pairs and kill
+        // the ArrayItemRemoval / UnwrapStrReplace mutants on line 111.
+        $input = 'a \\b"c';
+        $expected = '"a \\\\b\\"c"';
+        self::assertSame($expected, CommandBuilder::quoteString($input));
+    }
+
+    public function testQuoteStringEmptyReturnsExactlyTwoDoubleQuotes(): void
+    {
+        // Pin the exact return value for the empty-string path to kill
+        // ReturnRemoval (line 104) and the LogicalOr mutant (line 101 — the
+        // empty-string OR operand): if `||` were `&&`, an empty input would
+        // not match the control-char regex and would fall through to the
+        // atom regex which would also fail (empty doesn't match `+`),
+        // landing in the third path that escapes-and-quotes the empty
+        // string. The result is the same `""`, so this assertion alone
+        // can't distinguish the LogicalOr mutant — see the second
+        // assertion below.
+        self::assertSame('""', CommandBuilder::quoteString(''));
+    }
+
+    public function testEncodeMailboxNameModifiedUtf7VsUtf8DiffersForNonAscii(): void
+    {
+        // Without utf8Enabled, the German umlaut must be encoded into
+        // modified UTF-7 (which produces an ASCII-only `&...-` envelope).
+        // With utf8Enabled, the input is passed straight to quoteString,
+        // which wraps the bare UTF-8 string in `"..."`. The two outputs
+        // are observably different — kills the FalseValue (default param),
+        // IfNegation, and ReturnRemoval mutants on encodeMailboxName.
+        $modifiedUtf7 = CommandBuilder::encodeMailboxName('Entwürfe');
+        $utf8         = CommandBuilder::encodeMailboxName('Entwürfe', utf8Enabled: true);
+
+        self::assertNotSame($modifiedUtf7, $utf8);
+        self::assertStringContainsString('&', $modifiedUtf7);
+        self::assertStringContainsString('Entwürfe', $utf8);
+    }
+
+    public function testEncodeMailboxNameAsciiWithSpaceUtf8DisabledFallsBackToQuotedString(): void
+    {
+        // Hits encodeMailboxName's `if ($utf8Enabled)` false branch with an
+        // input that mb_check_encoding accepts as ASCII but quoteString
+        // ends up wrapping in quotes (because of the space). Kills the
+        // FalseValue mutant on the parameter default and the IfNegation
+        // mutant on line 118.
+        self::assertSame(
+            '"My Folder"',
+            CommandBuilder::encodeMailboxName('My Folder', utf8Enabled: false),
+        );
+    }
+
+    public function testEncodeMailboxNameUtf8EnabledKeepsRawAsciiAtom(): void
+    {
+        // Companion to the previous test — hits the true branch directly so
+        // both arms of the IfNegation mutant are exercised.
+        self::assertSame(
+            'Posteingang',
+            CommandBuilder::encodeMailboxName('Posteingang', utf8Enabled: true),
+        );
+    }
+
+    public function testDecodeMailboxNameUtf8EnabledIsPassThrough(): void
+    {
+        // Kills ReturnRemoval on line 226 — when utf8Enabled is true,
+        // decodeMailboxName must return the input verbatim. Use a string
+        // containing `&` so that the modified-UTF-7 fallback would
+        // measurably alter the result if the early return is removed.
+        self::assertSame(
+            'foo &- bar',
+            CommandBuilder::decodeMailboxName('foo &- bar', utf8Enabled: true),
+        );
+    }
+
+    public function testUtf8ToModifiedUtf7AsciiInputIsPassThrough(): void
+    {
+        // Kills ReturnRemoval on line 128 — pure ASCII must short-circuit.
+        self::assertSame('Sent', CommandBuilder::utf8ToModifiedUtf7('Sent'));
+    }
+
+    public function testModifiedUtf7ToUtf8AsciiInputWithoutAmpersandIsPassThrough(): void
+    {
+        // Kills ReturnRemoval on line 174 + the LogicalAndAllSubExprNegation
+        // / LogicalAndSingleSubExprNegation mutants on line 173.
+        self::assertSame('INBOX', CommandBuilder::modifiedUtf7ToUtf8('INBOX'));
+    }
+
     public function testEncodeMailboxNameUtf8ModeAscii(): void
     {
         // Pure ASCII atoms are returned unquoted by quoteString

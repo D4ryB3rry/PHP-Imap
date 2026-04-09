@@ -896,4 +896,343 @@ final class FolderTest extends TestCase
 
         $folder->messagesRange(5, 3);
     }
+
+    public function testMessagesRangeAcceptsEqualFromAndTo(): void
+    {
+        // Boundary: from == to is a valid single-message range. Mutating the
+        // `<` to `<=` on Folder::messagesRange would reject this. Kills
+        // LessThan on line 150.
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            '* 1 FETCH (UID 5 FLAGS () INTERNALDATE "01-Jan-2024 12:00:00 +0000" RFC822.SIZE 1 ENVELOPE (NIL NIL NIL NIL NIL NIL NIL NIL NIL NIL))',
+            'A0001 OK FETCH done',
+        );
+
+        [$folder, $transceiver] = $this->makeFolder($connection);
+        $transceiver->selectedMailbox = 'INBOX';
+
+        $messages = $folder->messagesRange(5, 5);
+        self::assertSame(1, $messages->count());
+        self::assertStringContainsString('FETCH 5:5', $connection->writes[0]);
+    }
+
+    public function testMessagesRangeCallsSelectFirst(): void
+    {
+        // Kills the MethodCallRemoval mutant on `$this->select()` inside
+        // messagesRange — without it, no SELECT is sent before the FETCH.
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            'A0001 OK SELECT done',
+            '* 1 FETCH (UID 1 FLAGS () INTERNALDATE "01-Jan-2024 12:00:00 +0000" RFC822.SIZE 1 ENVELOPE (NIL NIL NIL NIL NIL NIL NIL NIL NIL NIL))',
+            'A0002 OK FETCH done',
+        );
+
+        [$folder] = $this->makeFolder($connection);
+
+        iterator_to_array($folder->messagesRange(1, 1));
+
+        self::assertSame("A0001 SELECT INBOX\r\n", $connection->writes[0]);
+        self::assertStringStartsWith('A0002 FETCH 1:1', $connection->writes[1]);
+    }
+
+    public function testStatusDefaultsToZeroForMissingAttributes(): void
+    {
+        // The server returns a STATUS response with NO attributes — every
+        // field of the resulting MailboxStatus must fall back to 0 (or null
+        // for the optional fields). Kills the Decrement/Increment mutants on
+        // the `?? 0` defaults at lines 90–94.
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            '* STATUS INBOX ()',
+            'A0001 OK STATUS done',
+        );
+
+        [$folder] = $this->makeFolder($connection);
+
+        $status = $folder->status();
+
+        self::assertSame(0, $status->messages);
+        self::assertSame(0, $status->recent);
+        self::assertSame(0, $status->uidNext);
+        self::assertSame(0, $status->uidValidity);
+        self::assertSame(0, $status->unseen);
+        self::assertNull($status->highestModSeq);
+        self::assertNull($status->size);
+    }
+
+    public function testStatusBreaksAfterFirstStatusUntagged(): void
+    {
+        // The break inside the STATUS-resolution loop must take the FIRST
+        // STATUS untagged. Mutating `break` to `continue` would let the
+        // loop iterate to the LAST one. Kills Break on line 83 by queueing
+        // two STATUS lines with different MESSAGES values and asserting the
+        // first wins.
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            '* STATUS INBOX (MESSAGES 7 RECENT 0 UIDNEXT 8 UIDVALIDITY 1 UNSEEN 0)',
+            '* STATUS INBOX (MESSAGES 99 RECENT 0 UIDNEXT 100 UIDVALIDITY 1 UNSEEN 0)',
+            'A0001 OK STATUS done',
+        );
+
+        [$folder] = $this->makeFolder($connection);
+
+        $status = $folder->status();
+
+        self::assertSame(7, $status->messages, 'first STATUS untagged must win — break must short-circuit');
+    }
+
+    public function testMessageRequestsBodyStructureInTheSameRoundTrip(): void
+    {
+        // The single-UID message() helper bundles BODYSTRUCTURE into the
+        // initial FETCH so attachments()/text()/html() do not need a second
+        // round-trip. The TrueValue mutant on line 172 would flip
+        // `withBodyStructure: true` to false. Assert BODYSTRUCTURE appears
+        // on the wire.
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            'A0001 OK SELECT done',
+            '* 1 FETCH (UID 42 FLAGS () INTERNALDATE "01-Jan-2024 12:00:00 +0000" RFC822.SIZE 1 ENVELOPE (NIL NIL NIL NIL NIL NIL NIL NIL NIL NIL) BODYSTRUCTURE ("TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "7BIT" 12 1 NIL NIL))',
+            'A0002 OK FETCH done',
+        );
+
+        [$folder] = $this->makeFolder($connection);
+
+        $message = $folder->message(new Uid(42));
+
+        self::assertStringContainsString('BODYSTRUCTURE', $connection->writes[1]);
+        self::assertNotNull($message->bodyStructure());
+        self::assertSame('TEXT', $message->bodyStructure()?->type);
+    }
+
+    public function testMessagesWithoutCriteriaDoesNotRequestBodyStructure(): void
+    {
+        // The default of streamFetchMessages is withBodyStructure=false. The
+        // FalseValue mutant on the default would force every messages() call
+        // to fetch BODYSTRUCTURE, bloating responses. Assert it is absent.
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            'A0001 OK SELECT done',
+            'A0002 OK FETCH done',
+        );
+
+        [$folder] = $this->makeFolder($connection);
+
+        iterator_to_array($folder->messages());
+
+        self::assertStringNotContainsString('BODYSTRUCTURE', $connection->writes[1]);
+    }
+
+    public function testRenameRootFolderWithoutParent(): void
+    {
+        // A root-level folder has no parent — `$this->mailboxPath->parent()`
+        // returns null. The null-safe `?->child()` short-circuits, the
+        // coalesce takes the right side, and rename succeeds. Mutating the
+        // null-safe call to a regular method call (NullSafeMethodCall) would
+        // raise a TypeError on `null->child()`.
+        $connection = new FakeConnection();
+        $connection->queueLines('A0001 OK RENAME done');
+
+        [$folder] = $this->makeFolder($connection, 'OldRoot');
+
+        $folder->rename('NewRoot');
+
+        self::assertSame("A0001 RENAME OldRoot NewRoot\r\n", $connection->writes[0]);
+        self::assertSame('NewRoot', $folder->path()->path);
+    }
+
+    public function testCopyMessagesAcceptsFolderInterfaceDestination(): void
+    {
+        // Kills the CastString mutant on line 315 — `(string) $destination->path()`
+        // → `$destination->path()` (a MailboxPath). Without the cast,
+        // CommandBuilder::encodeMailboxName receives an object instead of a
+        // string and either crashes or produces a different encoded path.
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            'A0001 OK SELECT done',
+            'A0002 OK COPY done',
+        );
+
+        [$folder] = $this->makeFolder($connection);
+
+        $dest = $this->createStub(\D4ry\ImapClient\Contract\FolderInterface::class);
+        $dest->method('path')->willReturn(new MailboxPath('Archive'));
+
+        $folder->copyMessages([new Uid(42)], $dest);
+
+        self::assertSame("A0002 UID COPY 42 Archive\r\n", $connection->writes[1]);
+    }
+
+    public function testAppendWritesExactCommandBytesWithLiteralPayload(): void
+    {
+        // Pins the byte-exact APPEND command line and the literal payload
+        // line. Kills the Concat / ConcatOperandRemoval mutants on lines
+        // 343 (date quoting), 346 (literal length brackets), and 360
+        // (literal payload + CRLF concat).
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            '+ Ready',
+            'A0001 OK APPEND completed',
+        );
+
+        [$folder] = $this->makeFolder($connection);
+
+        $rawMessage = "Subject: hi\r\n\r\nBody";
+        $folder->append(
+            $rawMessage,
+            [Flag::Seen],
+            new \DateTimeImmutable('2024-01-01 12:00:00 +0000'),
+        );
+
+        self::assertCount(2, $connection->writes);
+        self::assertSame(
+            'A0001 APPEND INBOX (\Seen) "01-Jan-2024 12:00:00 +0000" {' . strlen($rawMessage) . "}\r\n",
+            $connection->writes[0],
+        );
+        self::assertSame($rawMessage . "\r\n", $connection->writes[1]);
+    }
+
+    public function testAppendDrainsInflightStreamingFetchBeforeWriting(): void
+    {
+        // append() bypasses Transceiver::command() and writes the APPEND line
+        // directly to the wire, so it must drain any in-flight streaming
+        // FETCH itself before the wire write. Removing the
+        // drainStreamingFetch() call (line 350) would let the next command's
+        // reader see the leftover untagged FETCH responses.
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            // Streaming FETCH from messagesRange(1,2) — yields 1 then is
+            // abandoned via break, leaving message 2 + tagged response in
+            // the buffer.
+            '* 1 FETCH (UID 1 FLAGS () INTERNALDATE "01-Jan-2024 12:00:00 +0000" RFC822.SIZE 1 ENVELOPE (NIL NIL NIL NIL NIL NIL NIL NIL NIL NIL))',
+            '* 2 FETCH (UID 2 FLAGS () INTERNALDATE "01-Jan-2024 12:00:00 +0000" RFC822.SIZE 1 ENVELOPE (NIL NIL NIL NIL NIL NIL NIL NIL NIL NIL))',
+            'A0001 OK FETCH done',
+            // After drain, the APPEND continuation flow.
+            '+ Ready',
+            'A0002 OK APPEND completed',
+        );
+
+        [$folder, $transceiver] = $this->makeFolder($connection);
+        $transceiver->selectedMailbox = 'INBOX';
+
+        /** @noinspection LoopWhichDoesNotLoopInspection */
+        foreach ($folder->messagesRange(1, 2) as $msg) {
+            self::assertSame(1, $msg->uid()->value);
+            break;
+        }
+
+        // append() must drain the leftover stream before writing.
+        $folder->append('hi');
+
+        // The fact that this resolves cleanly proves the drain happened —
+        // the second wire write must be the APPEND command, not a leftover.
+        self::assertStringStartsWith('A0002 APPEND INBOX', $connection->writes[1]);
+    }
+
+    public function testMessageReturnsHydratedFieldsExactly(): void
+    {
+        // Pins seq, size, flags, internalDate and bodyStructure to exact
+        // values from a real fetch response. Kills several Coalesce mutants
+        // (line 500/501/503/521), the NotIdentical mutant on line 506
+        // (date string null-check), and the InstanceOf_/LogicalNot mutants
+        // on line 514 (BODYSTRUCTURE instanceof guard).
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            'A0001 OK SELECT done',
+            '* 5 FETCH (UID 42 FLAGS (\Seen \Flagged) INTERNALDATE "15-Jun-2024 10:30:45 +0200" RFC822.SIZE 9876 ENVELOPE (NIL "Hello world" NIL NIL NIL NIL NIL NIL NIL NIL) BODYSTRUCTURE ("TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "7BIT" 12 1 NIL NIL))',
+            'A0002 OK FETCH done',
+        );
+
+        [$folder] = $this->makeFolder($connection);
+
+        $message = $folder->message(new Uid(42));
+
+        self::assertSame(42, $message->uid()->value);
+        self::assertSame(5, $message->sequenceNumber()->value);
+        self::assertSame(9876, $message->size());
+        self::assertTrue($message->flags()->has(Flag::Seen));
+        self::assertTrue($message->flags()->has(Flag::Flagged));
+        self::assertSame('Hello world', $message->envelope()->subject);
+        // INTERNALDATE was a real string → date hydrated, not "now".
+        self::assertSame('2024-06-15 10:30:45', $message->internalDate()->format('Y-m-d H:i:s'));
+        // BODYSTRUCTURE was a real instance → preserved.
+        self::assertNotNull($message->bodyStructure());
+        self::assertSame('TEXT', $message->bodyStructure()?->type);
+    }
+
+    public function testParseFolderListBreaksOnEmptyName(): void
+    {
+        // The empty-name continue inside parseFolderList must `continue`,
+        // not `break` — otherwise the first empty-name LIST entry would
+        // silently swallow every subsequent valid entry. Kills Continue on
+        // line 606.
+        $connection = new FakeConnection();
+        [$folder] = $this->makeFolder($connection);
+
+        $untagged = [
+            new UntaggedResponse('LIST', ['attributes' => [], 'delimiter' => '/', 'name' => '']),
+            new UntaggedResponse('LIST', ['attributes' => [], 'delimiter' => '/', 'name' => 'INBOX/Drafts']),
+        ];
+
+        $method = new ReflectionMethod(Folder::class, 'parseFolderList');
+        /** @var \D4ry\ImapClient\Contract\FolderInterface[] $result */
+        $result = $method->invoke($folder, $untagged);
+
+        self::assertCount(1, $result);
+        self::assertSame('INBOX/Drafts', $result[0]->path()->path);
+    }
+
+    public function testParseFolderListBreaksOnFirstSpecialUseAttribute(): void
+    {
+        // The inner foreach over attrs must `break` once a SpecialUse arm
+        // matches, so the first matching attribute wins. Mutating to
+        // `continue` would let the LAST matching attribute win.
+        $connection = new FakeConnection();
+        [$folder] = $this->makeFolder($connection);
+
+        $untagged = [
+            new UntaggedResponse('LIST', [
+                'attributes' => ['\Sent', '\Drafts'],
+                'delimiter' => '/',
+                'name' => 'Mixed',
+            ]),
+        ];
+
+        $method = new ReflectionMethod(Folder::class, 'parseFolderList');
+        /** @var \D4ry\ImapClient\Contract\FolderInterface[] $result */
+        $result = $method->invoke($folder, $untagged);
+
+        self::assertCount(1, $result);
+        self::assertSame(SpecialUse::Sent, $result[0]->specialUse(), 'first matching SpecialUse attribute must win');
+    }
+
+    public function testStreamFetchMessagesBaseItemsRetryWritesProperParentheses(): void
+    {
+        // Kills the Concat / ConcatOperandRemoval cluster on line 457 — the
+        // base-items retry FETCH after an OBJECTID rejection must wrap the
+        // item list in parentheses. The byte-exact assertion in the existing
+        // testFetchMessagesFallsBackWhenServerRejectsObjectIdItems is too
+        // loose (assertStringNotContainsString); pin the exact retry line.
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            'A0001 OK SELECT done',
+            'A0002 BAD Unknown parameter: EMAILID',
+            'A0003 OK FETCH done',
+        );
+
+        [$folder] = $this->makeFolder(
+            $connection,
+            'INBOX',
+            null,
+            [Capability::ObjectId],
+        );
+
+        iterator_to_array($folder->messages());
+
+        // The third write is the retry FETCH; assert it has parens around
+        // the item list.
+        self::assertSame(
+            "A0003 FETCH 1:* (UID FLAGS ENVELOPE INTERNALDATE RFC822.SIZE)\r\n",
+            $connection->writes[2],
+        );
+    }
 }
