@@ -466,6 +466,7 @@ final class SocketConnectionTest extends TestCase
         try {
             $this->expectException(ConnectionException::class);
             $this->expectExceptionMessage('streamBytesTo() requires a valid stream resource');
+            /** @noinspection PhpParamsInspection -- intentional wrong type to test guard */
             $this->conn->streamBytesTo('not a resource', 4);
         } finally {
             @fclose($peer);
