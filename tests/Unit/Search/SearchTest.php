@@ -51,7 +51,7 @@ final class SearchTest extends TestCase
 
     public function testBodyTextAndAddressStringCriteria(): void
     {
-        $search = new Search()
+        $search = (new Search())
             ->body('invoice')
             ->text('newsletter')
             ->to('bob@example.com')
