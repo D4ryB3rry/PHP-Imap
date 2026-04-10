@@ -126,6 +126,7 @@ final class AttachmentTest extends TestCase
     private function primeCachedContent(Attachment $attachment, string $content): void
     {
         $prop = new ReflectionProperty(Attachment::class, 'cachedContent');
+        $prop->setAccessible(true);
         $prop->setValue($attachment, $content);
     }
 
@@ -427,6 +428,7 @@ final class AttachmentTest extends TestCase
         self::assertSame($decoded, file_get_contents($dir . '/random.bin'));
         // Streaming path must not populate the in-memory cache.
         $cacheProp = new ReflectionProperty(Attachment::class, 'cachedContent');
+        $cacheProp->setAccessible(true);
         self::assertNull($cacheProp->getValue($attachment));
         // Only one IMAP command was issued.
         self::assertCount(1, $connection->writes);

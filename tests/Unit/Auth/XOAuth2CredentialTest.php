@@ -194,6 +194,7 @@ final class XOAuth2CredentialTest extends TestCase
     {
         $reflection = new ReflectionClass(Transceiver::class);
         $property = $reflection->getProperty('cachedCapabilities');
+        $property->setAccessible(true);
         $property->setValue($transceiver, $capabilities);
     }
 }

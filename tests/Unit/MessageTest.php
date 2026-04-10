@@ -49,6 +49,7 @@ final class MessageTest extends TestCase
     private function setCapabilities(Transceiver $transceiver, string ...$caps): void
     {
         $prop = new ReflectionProperty(Transceiver::class, 'cachedCapabilities');
+        $prop->setAccessible(true);
         $prop->setValue($transceiver, $caps);
     }
 

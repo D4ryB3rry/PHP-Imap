@@ -61,6 +61,7 @@ final class FolderTest extends TestCase
     private function setCapabilities(Transceiver $transceiver, string ...$caps): void
     {
         $prop = new ReflectionProperty(Transceiver::class, 'cachedCapabilities');
+        $prop->setAccessible(true);
         $prop->setValue($transceiver, $caps);
     }
 
@@ -586,6 +587,7 @@ final class FolderTest extends TestCase
         [$folder] = $this->makeFolder($connection);
 
         $method = new ReflectionMethod(Folder::class, 'compressUidsToSet');
+        $method->setAccessible(true);
 
         self::assertSame($expected, $method->invoke($folder, $uids));
     }
@@ -701,6 +703,7 @@ final class FolderTest extends TestCase
         [$folder] = $this->makeFolder($connection);
 
         $method = new ReflectionMethod(Folder::class, 'fetchMessages');
+        $method->setAccessible(true);
         $result = $method->invoke($folder, []);
 
         self::assertSame([], $result);
@@ -790,6 +793,7 @@ final class FolderTest extends TestCase
         ];
 
         $method = new ReflectionMethod(Folder::class, 'parseFolderList');
+        $method->setAccessible(true);
         $result = $method->invoke($folder, $untagged);
 
         self::assertSame([], $result);
@@ -1175,6 +1179,7 @@ final class FolderTest extends TestCase
         ];
 
         $method = new ReflectionMethod(Folder::class, 'parseFolderList');
+        $method->setAccessible(true);
         /** @var \D4ry\ImapClient\Contract\FolderInterface[] $result */
         $result = $method->invoke($folder, $untagged);
 
@@ -1199,6 +1204,7 @@ final class FolderTest extends TestCase
         ];
 
         $method = new ReflectionMethod(Folder::class, 'parseFolderList');
+        $method->setAccessible(true);
         /** @var \D4ry\ImapClient\Contract\FolderInterface[] $result */
         $result = $method->invoke($folder, $untagged);
 

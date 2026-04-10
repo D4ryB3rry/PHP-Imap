@@ -593,6 +593,7 @@ final class SocketConnectionTest extends TestCase
         // through the public API because assertConnected() rejects unconnected
         // calls first. Exercise it directly so coverage reflects intent.
         $method = new \ReflectionMethod(SocketConnection::class, 'isTimedOut');
+        $method->setAccessible(true);
         self::assertFalse($method->invoke($this->conn));
     }
 
@@ -601,7 +602,9 @@ final class SocketConnectionTest extends TestCase
      */
     private function getInternalStream()
     {
-        $stream = (new ReflectionProperty(SocketConnection::class, 'stream'))->getValue($this->conn);
+        $streamProp = new ReflectionProperty(SocketConnection::class, 'stream');
+        $streamProp->setAccessible(true);
+        $stream = $streamProp->getValue($this->conn);
         self::assertIsResource($stream);
 
         return $stream;

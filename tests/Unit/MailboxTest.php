@@ -78,6 +78,7 @@ final class MailboxTest extends TestCase
     private function setCapabilities(Transceiver $transceiver, string ...$caps): void
     {
         $prop = new ReflectionProperty(Transceiver::class, 'cachedCapabilities');
+        $prop->setAccessible(true);
         $prop->setValue($transceiver, $caps);
     }
 
@@ -89,6 +90,7 @@ final class MailboxTest extends TestCase
         $ref = new ReflectionClass(Mailbox::class);
         $mailbox = $ref->newInstanceWithoutConstructor();
         $prop = $ref->getProperty('transceiver');
+        $prop->setAccessible(true);
         $prop->setValue($mailbox, $transceiver);
 
         return [$mailbox, $transceiver];
@@ -478,6 +480,7 @@ final class MailboxTest extends TestCase
         ];
 
         $method = new ReflectionMethod(Mailbox::class, 'parseFolderList');
+        $method->setAccessible(true);
         $result = $method->invoke($mailbox, $untagged);
 
         self::assertSame([], $result);
@@ -489,6 +492,7 @@ final class MailboxTest extends TestCase
         [$mailbox] = $this->makeMailbox($connection);
 
         $method = new ReflectionMethod(Mailbox::class, 'parseNamespaceResponse');
+        $method->setAccessible(true);
 
         // Non-string data → empty NamespaceInfo (covers line 351).
         $empty = $method->invoke($mailbox, 42);
@@ -725,6 +729,7 @@ final class MailboxTest extends TestCase
             $mailbox = Mailbox::connect($config);
 
             $transceiverProp = (new ReflectionClass(Mailbox::class))->getProperty('transceiver');
+            $transceiverProp->setAccessible(true);
             $transceiver = $transceiverProp->getValue($mailbox);
             self::assertInstanceOf(Transceiver::class, $transceiver);
             self::assertFalse(
