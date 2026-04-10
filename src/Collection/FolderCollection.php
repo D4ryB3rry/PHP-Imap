@@ -21,7 +21,7 @@ class FolderCollection implements \IteratorAggregate, \Countable, \ArrayAccess
      * @param \Closure(): FolderInterface[] $loader
      */
     public function __construct(
-        private readonly \Closure $loader,
+        private \Closure $loader,
     ) {
     }
 
@@ -54,7 +54,7 @@ class FolderCollection implements \IteratorAggregate, \Countable, \ArrayAccess
         return $this->load();
     }
 
-    public function bySpecialUse(SpecialUse $use): ?FolderInterface
+    public function bySpecialUse(string $use): ?FolderInterface
     {
         foreach ($this->load() as $folder) {
             if ($folder->specialUse() === $use) {
@@ -78,8 +78,13 @@ class FolderCollection implements \IteratorAggregate, \Countable, \ArrayAccess
 
     public function byPath(string $path): ?FolderInterface
     {
-        return array_find($this->load(), fn($folder) => (string)$folder->path() === $path);
+        foreach ($this->load() as $folder) {
+            if ((string) $folder->path() === $path) {
+                return $folder;
+            }
+        }
 
+        return null;
     }
 
     /**

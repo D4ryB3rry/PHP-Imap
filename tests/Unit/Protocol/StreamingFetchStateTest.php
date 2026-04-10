@@ -5,10 +5,11 @@ declare(strict_types=1);
 namespace D4ry\ImapClient\Tests\Unit\Protocol;
 
 use D4ry\ImapClient\Protocol\StreamingFetchState;
-use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(StreamingFetchState::class)]
+/**
+ * @covers \D4ry\ImapClient\Protocol\StreamingFetchState
+ */
 final class StreamingFetchStateTest extends TestCase
 {
     public function testConstructorStoresTagAndInitializesEmptyState(): void

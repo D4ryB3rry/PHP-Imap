@@ -19,21 +19,25 @@
     }
   ],
   "require": {
+    "php": ">=8.0",
     "ext-mbstring": "*",
     "ext-openssl": "*"
   },
   "require-dev": {
-    "phpunit/phpunit": "^13.0",
-    "infection/infection": "^0.32.6"
+    "phpunit/phpunit": "^9.5",
+    "infection/infection": "^0.25"
+  },
+  "extra": {
+    "branch-alias": {
+      "dev-php8.0-compability": "0.1.x-dev"
+    }
   },
   "scripts": {
     "test": "phpunit",
     "test:unit": "phpunit --testsuite unit",
     "test:integration": "phpunit --testsuite integration",
-    "test:coverage": "phpunit --coverage-html build/coverage/html --coverage-text",
-    "test:coverage:unit": "phpunit --testsuite unit --coverage-html build/coverage/html --coverage-text",
     "infection": "infection --threads=max --show-mutations",
-    "infection:ci": "infection --threads=max --logger-github --no-progress"
+    "infection:ci": "infection --threads=max --no-progress"
   },
   "config": {
     "allow-plugins": {

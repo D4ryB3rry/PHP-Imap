@@ -6,8 +6,10 @@ namespace D4ry\ImapClient\Tests\Integration\Provider;
 
 use D4ry\ImapClient\Tests\Integration\AbstractProviderIntegrationTestCase;
 
-#[\PHPUnit\Framework\Attributes\Group('integration')]
-#[\PHPUnit\Framework\Attributes\Group('provider-gmx')]
+/**
+ * @group integration
+ * @group provider-gmx
+ */
 final class GmxIntegrationTest extends AbstractProviderIntegrationTestCase
 {
     protected function envPrefix(): string

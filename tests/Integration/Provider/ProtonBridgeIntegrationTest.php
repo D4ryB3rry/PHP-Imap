@@ -11,11 +11,13 @@ use D4ry\ImapClient\Tests\Integration\AbstractProviderIntegrationTestCase;
  * (default 127.0.0.1:1143, STARTTLS, bridge-generated password). The bridge
  * presents a self-signed certificate, so peer verification must be disabled.
  */
-#[\PHPUnit\Framework\Attributes\Group('integration')]
-#[\PHPUnit\Framework\Attributes\Group('provider-proton')]
+/**
+ * @group integration
+ * @group provider-proton
+ */
 final class ProtonBridgeIntegrationTest extends AbstractProviderIntegrationTestCase
 {
-    private const array SSL_OPTIONS = [
+    private const SSL_OPTIONS = [
         'verify_peer' => false,
         'verify_peer_name' => false,
         'allow_self_signed' => true,

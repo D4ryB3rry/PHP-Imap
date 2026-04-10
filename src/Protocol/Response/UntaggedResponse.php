@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace D4ry\ImapClient\Protocol\Response;
 
-readonly class UntaggedResponse
+class UntaggedResponse
 {
     public function __construct(
         public string $type,

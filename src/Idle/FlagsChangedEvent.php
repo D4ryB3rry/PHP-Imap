@@ -13,8 +13,8 @@ class FlagsChangedEvent extends IdleEvent
 {
     public function __construct(
         string $rawLine,
-        public readonly int $sequenceNumber,
-        public readonly FlagSet $flags,
+        public int $sequenceNumber,
+        public FlagSet $flags,
     ) {
         parent::__construct($rawLine);
     }

@@ -22,44 +22,43 @@ use D4ry\ImapClient\Tests\Unit\Support\FakeConnection;
 use D4ry\ImapClient\ValueObject\MailboxPath;
 use D4ry\ImapClient\ValueObject\MailboxStatus;
 use D4ry\ImapClient\ValueObject\Uid;
-use PHPUnit\Framework\Attributes\CoversClass;
-use PHPUnit\Framework\Attributes\DataProvider;
-use PHPUnit\Framework\Attributes\UsesClass;
 use PHPUnit\Framework\TestCase;
 use ReflectionMethod;
 use ReflectionProperty;
 
-#[CoversClass(Folder::class)]
-#[UsesClass(Transceiver::class)]
-#[UsesClass(MessageCollection::class)]
-#[UsesClass(FolderCollection::class)]
-#[UsesClass(MailboxPath::class)]
-#[UsesClass(MailboxStatus::class)]
-#[UsesClass(Uid::class)]
-#[UsesClass(SearchResult::class)]
-#[UsesClass(Search::class)]
-#[UsesClass(Message::class)]
-#[UsesClass(\D4ry\ImapClient\Protocol\Command\Command::class)]
-#[UsesClass(\D4ry\ImapClient\Protocol\Command\CommandBuilder::class)]
-#[UsesClass(\D4ry\ImapClient\Protocol\Response\Response::class)]
-#[UsesClass(\D4ry\ImapClient\Protocol\Response\ResponseParser::class)]
-#[UsesClass(\D4ry\ImapClient\Protocol\Response\FetchResponseParser::class)]
-#[UsesClass(\D4ry\ImapClient\Protocol\Response\UntaggedResponse::class)]
-#[UsesClass(\D4ry\ImapClient\Protocol\StreamingFetchState::class)]
-#[UsesClass(\D4ry\ImapClient\Protocol\TagGenerator::class)]
-#[UsesClass(\D4ry\ImapClient\ValueObject\Tag::class)]
-#[UsesClass(\D4ry\ImapClient\ValueObject\Envelope::class)]
-#[UsesClass(\D4ry\ImapClient\ValueObject\FlagSet::class)]
-#[UsesClass(\D4ry\ImapClient\ValueObject\SequenceNumber::class)]
-#[UsesClass(\D4ry\ImapClient\Mime\HeaderDecoder::class)]
-#[UsesClass(\D4ry\ImapClient\Support\ImapDateFormatter::class)]
-#[UsesClass(\D4ry\ImapClient\Exception\ParseException::class)]
-#[UsesClass(\D4ry\ImapClient\Exception\ImapException::class)]
-#[UsesClass(\D4ry\ImapClient\Exception\CommandException::class)]
-#[UsesClass(\D4ry\ImapClient\ValueObject\BodyStructure::class)]
+/**
+ * @covers \D4ry\ImapClient\Folder
+ * @uses \D4ry\ImapClient\Protocol\Transceiver
+ * @uses \D4ry\ImapClient\Collection\MessageCollection
+ * @uses \D4ry\ImapClient\Collection\FolderCollection
+ * @uses \D4ry\ImapClient\ValueObject\MailboxPath
+ * @uses \D4ry\ImapClient\ValueObject\MailboxStatus
+ * @uses \D4ry\ImapClient\ValueObject\Uid
+ * @uses \D4ry\ImapClient\Search\SearchResult
+ * @uses \D4ry\ImapClient\Search\Search
+ * @uses \D4ry\ImapClient\Message
+ * @uses \D4ry\ImapClient\Protocol\Command\Command
+ * @uses \D4ry\ImapClient\Protocol\Command\CommandBuilder
+ * @uses \D4ry\ImapClient\Protocol\Response\Response
+ * @uses \D4ry\ImapClient\Protocol\Response\ResponseParser
+ * @uses \D4ry\ImapClient\Protocol\Response\FetchResponseParser
+ * @uses \D4ry\ImapClient\Protocol\Response\UntaggedResponse
+ * @uses \D4ry\ImapClient\Protocol\StreamingFetchState
+ * @uses \D4ry\ImapClient\Protocol\TagGenerator
+ * @uses \D4ry\ImapClient\ValueObject\Tag
+ * @uses \D4ry\ImapClient\ValueObject\Envelope
+ * @uses \D4ry\ImapClient\ValueObject\FlagSet
+ * @uses \D4ry\ImapClient\ValueObject\SequenceNumber
+ * @uses \D4ry\ImapClient\Mime\HeaderDecoder
+ * @uses \D4ry\ImapClient\Support\ImapDateFormatter
+ * @uses \D4ry\ImapClient\Exception\ParseException
+ * @uses \D4ry\ImapClient\Exception\ImapException
+ * @uses \D4ry\ImapClient\Exception\CommandException
+ * @uses \D4ry\ImapClient\ValueObject\BodyStructure
+ */
 final class FolderTest extends TestCase
 {
-    private function setCapabilities(Transceiver $transceiver, Capability ...$caps): void
+    private function setCapabilities(Transceiver $transceiver, string ...$caps): void
     {
         $prop = new ReflectionProperty(Transceiver::class, 'cachedCapabilities');
         $prop->setValue($transceiver, $caps);
@@ -68,7 +67,7 @@ final class FolderTest extends TestCase
     private function makeFolder(
         FakeConnection $connection,
         string $path = 'INBOX',
-        ?SpecialUse $specialUse = null,
+        ?string $specialUse = null,
         array $caps = [],
     ): array {
         $transceiver = new Transceiver($connection);
@@ -578,9 +577,9 @@ final class FolderTest extends TestCase
     }
 
     /**
+     * @dataProvider uidCompressionProvider
      * @param Uid[] $uids
      */
-    #[DataProvider('uidCompressionProvider')]
     public function testCompressUidsToSet(array $uids, string $expected): void
     {
         $connection = new FakeConnection();
@@ -759,8 +758,10 @@ final class FolderTest extends TestCase
         yield 'recent' => [Flag::Recent, 'RECENT'];
     }
 
-    #[DataProvider('flagSearchProvider')]
-    public function testMessagesFlagCriteriaCoversAllArms(Flag $flag, string $expectedToken): void
+    /**
+     * @dataProvider flagSearchProvider
+     */
+    public function testMessagesFlagCriteriaCoversAllArms(string $flag, string $expectedToken): void
     {
         $connection = new FakeConnection();
         $connection->queueLines(

@@ -21,10 +21,12 @@ use D4ry\ImapClient\Exception\ReplayMismatchException;
  * lifecycle events. A recorded *_err event causes the corresponding exception
  * to be re-thrown.
  *
- * Note: a recording captured with credential redaction enabled cannot drive
- * an authentication exchange (the recorded write events contain "***").
- * Either record with $redactCredentials=false, or use the recording for the
- * post-auth portion of the session only.
+ * Credential redaction is handled symmetrically: the same {@see Redactor}
+ * that RecordingConnection applied when capturing the session is applied to
+ * every incoming write before it is compared against the recorded line. For
+ * non-credential lines this is a no-op and the byte-exact check stands; for
+ * LOGIN / AUTHENTICATE the redacted forms on both sides match, so a recording
+ * captured with $redactCredentials=true can still drive the auth exchange.
  */
 class ReplayConnection implements ConnectionInterface
 {
@@ -38,8 +40,14 @@ class ReplayConnection implements ConnectionInterface
     /** @var list<string> */
     public array $mismatches = [];
 
-    public function __construct(string $recordPath, private readonly bool $strict = true)
+    private Redactor $recordedRedactor;
+
+    private Redactor $liveRedactor;
+
+    public function __construct(string $recordPath, private bool $strict = true)
     {
+        $this->recordedRedactor = new Redactor();
+        $this->liveRedactor = new Redactor();
         $contents = @file_get_contents($recordPath);
 
         if ($contents === false) {
@@ -74,7 +82,7 @@ class ReplayConnection implements ConnectionInterface
         $this->events = $events;
     }
 
-    public function open(string $host, int $port, Encryption $encryption, float $timeout, array $sslOptions = []): void
+    public function open(string $host, int $port, string $encryption, float $timeout, array $sslOptions = []): void
     {
         $event = $this->expect('open');
         // Optionally lifecycle could be checked here, but the recording is
@@ -174,7 +182,20 @@ class ReplayConnection implements ConnectionInterface
         $event = $this->expect('write');
         $expected = $this->stringField($event, 'data');
 
-        if ($expected !== $data) {
+        // Apply the same credential redaction RecordingConnection uses to
+        // BOTH the recorded line and the incoming live line. Two independent
+        // Redactor instances stay in lock-step over the session, so:
+        //   - a recording captured with redaction enabled still matches a
+        //     live auth exchange (both sides collapse to "*** ***"),
+        //   - a recording captured without redaction still matches a live
+        //     replay of the same credentials (both sides collapse the same
+        //     way), and
+        //   - every non-credential line is unchanged by the Redactor, so
+        //     the byte-exact check stands everywhere else.
+        $expectedComparable = $this->redactForCompare($this->recordedRedactor, $expected);
+        $liveComparable = $this->redactForCompare($this->liveRedactor, $data);
+
+        if ($expectedComparable !== $liveComparable) {
             $message = sprintf(
                 'Replay event %d: write mismatch. Expected %s, got %s',
                 $this->cursor - 1,
@@ -219,6 +240,22 @@ class ReplayConnection implements ConnectionInterface
     public function isConnected(): bool
     {
         return $this->connected;
+    }
+
+    /**
+     * Apply the wire-line Redactor transformation used by RecordingConnection,
+     * preserving the trailing CRLF framing so the comparison stays line-for-line.
+     */
+    private function redactForCompare(Redactor $redactor, string $line): string
+    {
+        $stripped = rtrim($line, "\r\n");
+        $redacted = $redactor->redact($stripped);
+
+        if ($redacted === $stripped) {
+            return $line;
+        }
+
+        return $redacted . substr($line, strlen($stripped));
     }
 
     /**

@@ -16,19 +16,19 @@ use D4ry\ImapClient\Protocol\TagGenerator;
 use D4ry\ImapClient\Protocol\Transceiver;
 use D4ry\ImapClient\Tests\Unit\Support\FakeConnection;
 use D4ry\ImapClient\ValueObject\Tag;
-use PHPUnit\Framework\Attributes\CoversClass;
-use PHPUnit\Framework\Attributes\UsesClass;
 use PHPUnit\Framework\TestCase;
 use ReflectionClass;
 
-#[CoversClass(XOAuth2Credential::class)]
-#[UsesClass(Transceiver::class)]
-#[UsesClass(Command::class)]
-#[UsesClass(Response::class)]
-#[UsesClass(ResponseParser::class)]
-#[UsesClass(TagGenerator::class)]
-#[UsesClass(Tag::class)]
-#[UsesClass(CommandException::class)]
+/**
+ * @covers \D4ry\ImapClient\Auth\XOAuth2Credential
+ * @uses \D4ry\ImapClient\Protocol\Transceiver
+ * @uses \D4ry\ImapClient\Protocol\Command\Command
+ * @uses \D4ry\ImapClient\Protocol\Response\Response
+ * @uses \D4ry\ImapClient\Protocol\Response\ResponseParser
+ * @uses \D4ry\ImapClient\Protocol\TagGenerator
+ * @uses \D4ry\ImapClient\ValueObject\Tag
+ * @uses \D4ry\ImapClient\Exception\CommandException
+ */
 final class XOAuth2CredentialTest extends TestCase
 {
     public function testMechanism(): void

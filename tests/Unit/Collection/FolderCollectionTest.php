@@ -6,19 +6,19 @@ namespace D4ry\ImapClient\Tests\Unit\Collection;
 
 use D4ry\ImapClient\Collection\FolderCollection;
 use D4ry\ImapClient\Contract\FolderInterface;
-use D4ry\ImapClient\Enum\SpecialUse;
 use D4ry\ImapClient\Exception\ReadOnlyCollectionException;
+use D4ry\ImapClient\Enum\SpecialUse;
 use D4ry\ImapClient\ValueObject\MailboxPath;
-use PHPUnit\Framework\Attributes\CoversClass;
-use PHPUnit\Framework\Attributes\UsesClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(FolderCollection::class)]
-#[UsesClass(MailboxPath::class)]
-#[UsesClass(ReadOnlyCollectionException::class)]
+/**
+ * @covers \D4ry\ImapClient\Collection\FolderCollection
+ * @uses \D4ry\ImapClient\ValueObject\MailboxPath
+ * @uses \D4ry\ImapClient\Exception\ReadOnlyCollectionException
+ */
 final class FolderCollectionTest extends TestCase
 {
-    private function folder(string $name, string $path, ?SpecialUse $use = null): FolderInterface
+    private function folder(string $name, string $path, ?string $use = null): FolderInterface
     {
         $stub = $this->createStub(FolderInterface::class);
         $stub->method('name')->willReturn($name);

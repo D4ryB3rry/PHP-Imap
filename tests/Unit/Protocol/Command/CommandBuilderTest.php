@@ -9,16 +9,15 @@ use D4ry\ImapClient\Protocol\Command\CommandBuilder;
 use D4ry\ImapClient\Protocol\TagGenerator;
 use D4ry\ImapClient\Support\Literal;
 use D4ry\ImapClient\ValueObject\Tag;
-use PHPUnit\Framework\Attributes\CoversClass;
-use PHPUnit\Framework\Attributes\DataProvider;
-use PHPUnit\Framework\Attributes\UsesClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(CommandBuilder::class)]
-#[CoversClass(Command::class)]
-#[UsesClass(TagGenerator::class)]
-#[UsesClass(Tag::class)]
-#[UsesClass(Literal::class)]
+/**
+ * @covers \D4ry\ImapClient\Protocol\Command\CommandBuilder
+ * @covers \D4ry\ImapClient\Protocol\Command\Command
+ * @uses \D4ry\ImapClient\Protocol\TagGenerator
+ * @uses \D4ry\ImapClient\ValueObject\Tag
+ * @uses \D4ry\ImapClient\Support\Literal
+ */
 final class CommandBuilderTest extends TestCase
 {
     public function testQuoteStringPlainAtomNotQuoted(): void
@@ -167,7 +166,9 @@ final class CommandBuilderTest extends TestCase
         self::assertSame('Entwürfe', $decoded);
     }
 
-    #[DataProvider('mailboxNameProvider')]
+    /**
+     * @dataProvider mailboxNameProvider
+     */
     public function testRoundTripModifiedUtf7(string $name): void
     {
         $encoded = CommandBuilder::utf8ToModifiedUtf7($name);

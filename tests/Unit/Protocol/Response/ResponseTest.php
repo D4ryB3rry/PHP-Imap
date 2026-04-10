@@ -7,12 +7,12 @@ namespace D4ry\ImapClient\Tests\Unit\Protocol\Response;
 use D4ry\ImapClient\Protocol\Response\Response;
 use D4ry\ImapClient\Protocol\Response\ResponseStatus;
 use D4ry\ImapClient\Protocol\Response\UntaggedResponse;
-use PHPUnit\Framework\Attributes\CoversClass;
-use PHPUnit\Framework\Attributes\UsesClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(Response::class)]
-#[UsesClass(UntaggedResponse::class)]
+/**
+ * @covers \D4ry\ImapClient\Protocol\Response\Response
+ * @uses \D4ry\ImapClient\Protocol\Response\UntaggedResponse
+ */
 final class ResponseTest extends TestCase
 {
     public function testDefaults(): void

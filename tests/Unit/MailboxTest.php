@@ -34,54 +34,54 @@ use D4ry\ImapClient\Tests\Unit\Support\FakeConnection;
 use D4ry\ImapClient\Tests\Unit\Support\LoopbackServer;
 use D4ry\ImapClient\Tests\Unit\Support\TimeoutOnceConnection;
 use D4ry\ImapClient\ValueObject\NamespaceInfo;
-use PHPUnit\Framework\Attributes\CoversClass;
-use PHPUnit\Framework\Attributes\UsesClass;
 use PHPUnit\Framework\TestCase;
 use ReflectionClass;
 use ReflectionMethod;
 use ReflectionProperty;
 
-#[CoversClass(Mailbox::class)]
-#[UsesClass(Transceiver::class)]
-#[UsesClass(Folder::class)]
-#[UsesClass(FolderCollection::class)]
-#[UsesClass(NamespaceInfo::class)]
-#[UsesClass(\D4ry\ImapClient\ValueObject\MailboxPath::class)]
-#[UsesClass(\D4ry\ImapClient\ValueObject\Tag::class)]
-#[UsesClass(\D4ry\ImapClient\ValueObject\FlagSet::class)]
-#[UsesClass(CapabilityException::class)]
-#[UsesClass(CommandException::class)]
-#[UsesClass(ConnectionException::class)]
-#[UsesClass(IdleHeartbeatEvent::class)]
-#[UsesClass(MessageReceivedEvent::class)]
-#[UsesClass(MessageExpungedEvent::class)]
-#[UsesClass(FlagsChangedEvent::class)]
-#[UsesClass(RecentCountEvent::class)]
-#[UsesClass(\D4ry\ImapClient\Protocol\Command\Command::class)]
-#[UsesClass(\D4ry\ImapClient\Protocol\Command\CommandBuilder::class)]
-#[UsesClass(\D4ry\ImapClient\Protocol\Response\Response::class)]
-#[UsesClass(\D4ry\ImapClient\Protocol\Response\ResponseParser::class)]
-#[UsesClass(\D4ry\ImapClient\Protocol\Response\FetchResponseParser::class)]
-#[UsesClass(\D4ry\ImapClient\Protocol\Response\UntaggedResponse::class)]
-#[UsesClass(\D4ry\ImapClient\Protocol\TagGenerator::class)]
-#[UsesClass(LoginCredential::class)]
-#[UsesClass(\D4ry\ImapClient\Auth\Credential::class)]
-#[UsesClass(Config::class)]
-#[UsesClass(SocketConnection::class)]
-#[UsesClass(LoggingConnection::class)]
-#[UsesClass(RecordingConnection::class)]
-#[UsesClass(ReplayConnection::class)]
-#[UsesClass(\D4ry\ImapClient\Connection\Redactor::class)]
-#[UsesClass(\D4ry\ImapClient\Exception\TimeoutException::class)]
+/**
+ * @covers \D4ry\ImapClient\Mailbox
+ * @uses \D4ry\ImapClient\Protocol\Transceiver
+ * @uses \D4ry\ImapClient\Folder
+ * @uses \D4ry\ImapClient\Collection\FolderCollection
+ * @uses \D4ry\ImapClient\ValueObject\NamespaceInfo
+ * @uses \D4ry\ImapClient\ValueObject\MailboxPath
+ * @uses \D4ry\ImapClient\ValueObject\Tag
+ * @uses \D4ry\ImapClient\ValueObject\FlagSet
+ * @uses \D4ry\ImapClient\Exception\CapabilityException
+ * @uses \D4ry\ImapClient\Exception\CommandException
+ * @uses \D4ry\ImapClient\Exception\ConnectionException
+ * @uses \D4ry\ImapClient\Idle\IdleHeartbeatEvent
+ * @uses \D4ry\ImapClient\Idle\MessageReceivedEvent
+ * @uses \D4ry\ImapClient\Idle\MessageExpungedEvent
+ * @uses \D4ry\ImapClient\Idle\FlagsChangedEvent
+ * @uses \D4ry\ImapClient\Idle\RecentCountEvent
+ * @uses \D4ry\ImapClient\Protocol\Command\Command
+ * @uses \D4ry\ImapClient\Protocol\Command\CommandBuilder
+ * @uses \D4ry\ImapClient\Protocol\Response\Response
+ * @uses \D4ry\ImapClient\Protocol\Response\ResponseParser
+ * @uses \D4ry\ImapClient\Protocol\Response\FetchResponseParser
+ * @uses \D4ry\ImapClient\Protocol\Response\UntaggedResponse
+ * @uses \D4ry\ImapClient\Protocol\TagGenerator
+ * @uses \D4ry\ImapClient\Auth\LoginCredential
+ * @uses \D4ry\ImapClient\Auth\Contract\CredentialInterface
+ * @uses \D4ry\ImapClient\Config
+ * @uses \D4ry\ImapClient\Connection\SocketConnection
+ * @uses \D4ry\ImapClient\Connection\LoggingConnection
+ * @uses \D4ry\ImapClient\Connection\RecordingConnection
+ * @uses \D4ry\ImapClient\Connection\ReplayConnection
+ * @uses \D4ry\ImapClient\Connection\Redactor
+ * @uses \D4ry\ImapClient\Exception\TimeoutException
+ */
 final class MailboxTest extends TestCase
 {
-    private function setCapabilities(Transceiver $transceiver, Capability ...$caps): void
+    private function setCapabilities(Transceiver $transceiver, string ...$caps): void
     {
         $prop = new ReflectionProperty(Transceiver::class, 'cachedCapabilities');
         $prop->setValue($transceiver, $caps);
     }
 
-    private function makeMailbox(\D4ry\ImapClient\Connection\Contract\ConnectionInterface $connection, Capability ...$caps): array
+    private function makeMailbox(\D4ry\ImapClient\Connection\Contract\ConnectionInterface $connection, string ...$caps): array
     {
         $transceiver = new Transceiver($connection);
         $this->setCapabilities($transceiver, Capability::Imap4rev1, ...$caps);

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace D4ry\ImapClient\Mime;
 
-readonly class ParsedMessage
+class ParsedMessage
 {
     /**
      * @param array<string, string[]> $headers

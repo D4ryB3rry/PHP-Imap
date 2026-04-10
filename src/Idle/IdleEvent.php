@@ -6,10 +6,10 @@ namespace D4ry\ImapClient\Idle;
 
 abstract class IdleEvent
 {
-    public readonly float $timestamp;
+    public float $timestamp;
 
     public function __construct(
-        public readonly string $rawLine,
+        public string $rawLine,
     ) {
         $this->timestamp = microtime(true);
     }

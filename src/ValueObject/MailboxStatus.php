@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace D4ry\ImapClient\ValueObject;
 
-readonly class MailboxStatus
+class MailboxStatus
 {
     public function __construct(
         public int $messages = 0,

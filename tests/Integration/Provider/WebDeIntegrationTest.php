@@ -6,8 +6,10 @@ namespace D4ry\ImapClient\Tests\Integration\Provider;
 
 use D4ry\ImapClient\Tests\Integration\AbstractProviderIntegrationTestCase;
 
-#[\PHPUnit\Framework\Attributes\Group('integration')]
-#[\PHPUnit\Framework\Attributes\Group('provider-webde')]
+/**
+ * @group integration
+ * @group provider-webde
+ */
 final class WebDeIntegrationTest extends AbstractProviderIntegrationTestCase
 {
     protected function envPrefix(): string

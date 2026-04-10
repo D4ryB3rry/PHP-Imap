@@ -8,7 +8,7 @@ use D4ry\ImapClient\Enum\Encryption;
 
 interface ConnectionInterface
 {
-    public function open(string $host, int $port, Encryption $encryption, float $timeout, array $sslOptions = []): void;
+    public function open(string $host, int $port, string $encryption, float $timeout, array $sslOptions = []): void;
 
     /**
      * Override the read timeout on the underlying stream after open().

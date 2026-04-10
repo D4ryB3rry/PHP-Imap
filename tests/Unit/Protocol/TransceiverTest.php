@@ -18,23 +18,23 @@ use D4ry\ImapClient\Protocol\TagGenerator;
 use D4ry\ImapClient\Protocol\Transceiver;
 use D4ry\ImapClient\Tests\Unit\Support\FakeConnection;
 use D4ry\ImapClient\ValueObject\Tag;
-use PHPUnit\Framework\Attributes\CoversClass;
-use PHPUnit\Framework\Attributes\UsesClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(Transceiver::class)]
-#[UsesClass(Command::class)]
-#[UsesClass(Response::class)]
-#[UsesClass(FetchResponseParser::class)]
-#[UsesClass(ResponseParser::class)]
-#[UsesClass(StreamingFetchState::class)]
-#[UsesClass(\D4ry\ImapClient\ValueObject\Uid::class)]
-#[UsesClass(\D4ry\ImapClient\ValueObject\FlagSet::class)]
-#[UsesClass(UntaggedResponse::class)]
-#[UsesClass(TagGenerator::class)]
-#[UsesClass(Tag::class)]
-#[UsesClass(CommandException::class)]
-#[UsesClass(CapabilityException::class)]
+/**
+ * @covers \D4ry\ImapClient\Protocol\Transceiver
+ * @uses \D4ry\ImapClient\Protocol\Command\Command
+ * @uses \D4ry\ImapClient\Protocol\Response\Response
+ * @uses \D4ry\ImapClient\Protocol\Response\FetchResponseParser
+ * @uses \D4ry\ImapClient\Protocol\Response\ResponseParser
+ * @uses \D4ry\ImapClient\Protocol\StreamingFetchState
+ * @uses \D4ry\ImapClient\ValueObject\Uid
+ * @uses \D4ry\ImapClient\ValueObject\FlagSet
+ * @uses \D4ry\ImapClient\Protocol\Response\UntaggedResponse
+ * @uses \D4ry\ImapClient\Protocol\TagGenerator
+ * @uses \D4ry\ImapClient\ValueObject\Tag
+ * @uses \D4ry\ImapClient\Exception\CommandException
+ * @uses \D4ry\ImapClient\Exception\CapabilityException
+ */
 final class TransceiverTest extends TestCase
 {
     public function testReadGreetingDelegatesToParser(): void
@@ -603,7 +603,7 @@ final class TransceiverTest extends TestCase
         self::assertContains(Capability::Move, $caps);
         self::assertContains(Capability::Idle, $caps);
         foreach ($caps as $cap) {
-            self::assertInstanceOf(Capability::class, $cap);
+            self::assertIsString($cap);
         }
     }
 }

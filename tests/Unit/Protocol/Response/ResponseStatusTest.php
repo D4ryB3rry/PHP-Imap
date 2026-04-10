@@ -5,15 +5,15 @@ declare(strict_types=1);
 namespace D4ry\ImapClient\Tests\Unit\Protocol\Response;
 
 use D4ry\ImapClient\Protocol\Response\ResponseStatus;
-use PHPUnit\Framework\Attributes\CoversClass;
-use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(ResponseStatus::class)]
+/**
+ * @covers \D4ry\ImapClient\Protocol\Response\ResponseStatus
+ */
 final class ResponseStatusTest extends TestCase
 {
     /**
-     * @return iterable<string, array{string, ResponseStatus}>
+     * @return iterable<string, array{string, string}>
      */
     public static function statusProvider(): iterable
     {
@@ -24,11 +24,13 @@ final class ResponseStatusTest extends TestCase
         yield 'BYE'     => ['BYE', ResponseStatus::Bye];
     }
 
-    #[DataProvider('statusProvider')]
-    public function testFromString(string $value, ResponseStatus $expected): void
+    /**
+     * @dataProvider statusProvider
+     */
+    public function testFromString(string $value, string $expected): void
     {
         self::assertSame($expected, ResponseStatus::from($value));
-        self::assertSame($value, $expected->value);
+        self::assertSame($value, $expected);
     }
 
     public function testCasesContainsAllStatuses(): void

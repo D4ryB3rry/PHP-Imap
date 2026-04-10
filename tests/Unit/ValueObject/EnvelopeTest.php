@@ -6,12 +6,12 @@ namespace D4ry\ImapClient\Tests\Unit\ValueObject;
 
 use D4ry\ImapClient\ValueObject\Address;
 use D4ry\ImapClient\ValueObject\Envelope;
-use PHPUnit\Framework\Attributes\CoversClass;
-use PHPUnit\Framework\Attributes\UsesClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(Envelope::class)]
-#[UsesClass(Address::class)]
+/**
+ * @covers \D4ry\ImapClient\ValueObject\Envelope
+ * @uses \D4ry\ImapClient\ValueObject\Address
+ */
 final class EnvelopeTest extends TestCase
 {
     public function testHoldsAllFields(): void

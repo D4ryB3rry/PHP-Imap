@@ -5,10 +5,11 @@ declare(strict_types=1);
 namespace D4ry\ImapClient\Tests\Unit\Mime;
 
 use D4ry\ImapClient\Mime\HeaderDecoder;
-use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(HeaderDecoder::class)]
+/**
+ * @covers \D4ry\ImapClient\Mime\HeaderDecoder
+ */
 final class HeaderDecoderTest extends TestCase
 {
     public function testDecodesBase64EncodedWord(): void

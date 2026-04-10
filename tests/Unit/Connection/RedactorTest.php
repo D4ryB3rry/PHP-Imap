@@ -5,10 +5,11 @@ declare(strict_types=1);
 namespace D4ry\ImapClient\Tests\Unit\Connection;
 
 use D4ry\ImapClient\Connection\Redactor;
-use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(Redactor::class)]
+/**
+ * @covers \D4ry\ImapClient\Connection\Redactor
+ */
 final class RedactorTest extends TestCase
 {
     public function testLoginWithQuotedArgsIsRedacted(): void

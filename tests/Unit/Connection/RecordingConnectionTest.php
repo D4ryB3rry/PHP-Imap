@@ -10,11 +10,12 @@ use D4ry\ImapClient\Enum\Encryption;
 use D4ry\ImapClient\Exception\ConnectionException;
 use D4ry\ImapClient\Tests\Unit\Support\FakeConnection;
 use D4ry\ImapClient\Tests\Unit\Support\ThrowingConnection;
-use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(RecordingConnection::class)]
-#[CoversClass(Redactor::class)]
+/**
+ * @covers \D4ry\ImapClient\Connection\RecordingConnection
+ * @covers \D4ry\ImapClient\Connection\Redactor
+ */
 final class RecordingConnectionTest extends TestCase
 {
     private string $recordPath;

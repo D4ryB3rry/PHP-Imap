@@ -7,11 +7,12 @@ namespace D4ry\ImapClient\Tests\Unit\Mime;
 use D4ry\ImapClient\Enum\ContentTransferEncoding;
 use D4ry\ImapClient\Mime\ParsedMessage;
 use D4ry\ImapClient\Mime\ParsedPart;
-use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(ParsedMessage::class)]
-#[CoversClass(ParsedPart::class)]
+/**
+ * @covers \D4ry\ImapClient\Mime\ParsedMessage
+ * @covers \D4ry\ImapClient\Mime\ParsedPart
+ */
 final class ParsedMessageTest extends TestCase
 {
     public function testHeaderLookupIsCaseInsensitive(): void

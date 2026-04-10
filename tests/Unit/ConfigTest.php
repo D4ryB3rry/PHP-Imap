@@ -7,12 +7,12 @@ namespace D4ry\ImapClient\Tests\Unit;
 use D4ry\ImapClient\Auth\PlainCredential;
 use D4ry\ImapClient\Config;
 use D4ry\ImapClient\Enum\Encryption;
-use PHPUnit\Framework\Attributes\CoversClass;
-use PHPUnit\Framework\Attributes\UsesClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(Config::class)]
-#[UsesClass(PlainCredential::class)]
+/**
+ * @covers \D4ry\ImapClient\Config
+ * @uses \D4ry\ImapClient\Auth\PlainCredential
+ */
 final class ConfigTest extends TestCase
 {
     public function testCreateAppliesDefaults(): void

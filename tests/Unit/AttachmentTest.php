@@ -10,24 +10,24 @@ use D4ry\ImapClient\Protocol\Transceiver;
 use D4ry\ImapClient\Tests\Unit\Support\FakeConnection;
 use D4ry\ImapClient\ValueObject\BodyStructure;
 use D4ry\ImapClient\ValueObject\Uid;
-use PHPUnit\Framework\Attributes\CoversClass;
-use PHPUnit\Framework\Attributes\UsesClass;
 use PHPUnit\Framework\TestCase;
 use ReflectionProperty;
 use RuntimeException;
 
-#[CoversClass(Attachment::class)]
-#[UsesClass(Transceiver::class)]
-#[UsesClass(BodyStructure::class)]
-#[UsesClass(Uid::class)]
-#[UsesClass(\D4ry\ImapClient\Protocol\Command\Command::class)]
-#[UsesClass(\D4ry\ImapClient\Protocol\Command\CommandBuilder::class)]
-#[UsesClass(\D4ry\ImapClient\Protocol\Response\Response::class)]
-#[UsesClass(\D4ry\ImapClient\Protocol\Response\ResponseParser::class)]
-#[UsesClass(\D4ry\ImapClient\Protocol\Response\FetchResponseParser::class)]
-#[UsesClass(\D4ry\ImapClient\Protocol\Response\UntaggedResponse::class)]
-#[UsesClass(\D4ry\ImapClient\Protocol\TagGenerator::class)]
-#[UsesClass(\D4ry\ImapClient\ValueObject\Tag::class)]
+/**
+ * @covers \D4ry\ImapClient\Attachment
+ * @uses \D4ry\ImapClient\Protocol\Transceiver
+ * @uses \D4ry\ImapClient\ValueObject\BodyStructure
+ * @uses \D4ry\ImapClient\ValueObject\Uid
+ * @uses \D4ry\ImapClient\Protocol\Command\Command
+ * @uses \D4ry\ImapClient\Protocol\Command\CommandBuilder
+ * @uses \D4ry\ImapClient\Protocol\Response\Response
+ * @uses \D4ry\ImapClient\Protocol\Response\ResponseParser
+ * @uses \D4ry\ImapClient\Protocol\Response\FetchResponseParser
+ * @uses \D4ry\ImapClient\Protocol\Response\UntaggedResponse
+ * @uses \D4ry\ImapClient\Protocol\TagGenerator
+ * @uses \D4ry\ImapClient\ValueObject\Tag
+ */
 final class AttachmentTest extends TestCase
 {
     /** @var string[] */
@@ -76,7 +76,7 @@ final class AttachmentTest extends TestCase
         string $subtype = 'PDF',
         array $parameters = [],
         ?string $id = null,
-        ?ContentTransferEncoding $encoding = ContentTransferEncoding::SevenBit,
+        ?string $encoding = ContentTransferEncoding::SevenBit,
         int $size = 123,
         ?string $disposition = null,
         ?string $dispositionFilename = null,

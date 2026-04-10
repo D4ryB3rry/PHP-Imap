@@ -6,12 +6,12 @@ namespace D4ry\ImapClient\Tests\Unit\Search;
 
 use D4ry\ImapClient\Search\SearchResult;
 use D4ry\ImapClient\ValueObject\Uid;
-use PHPUnit\Framework\Attributes\CoversClass;
-use PHPUnit\Framework\Attributes\UsesClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(SearchResult::class)]
-#[UsesClass(Uid::class)]
+/**
+ * @covers \D4ry\ImapClient\Search\SearchResult
+ * @uses \D4ry\ImapClient\ValueObject\Uid
+ */
 final class SearchResultTest extends TestCase
 {
     public function testEmptyResult(): void
@@ -62,10 +62,4 @@ final class SearchResultTest extends TestCase
         self::assertSame([10, 2, 99, 3], $result->uidValues());
     }
 
-    public function testIsReadonly(): void
-    {
-        $reflection = new \ReflectionClass(SearchResult::class);
-
-        self::assertTrue($reflection->isReadOnly());
-    }
 }

@@ -11,17 +11,17 @@ use D4ry\ImapClient\Protocol\Response\ResponseParser;
 use D4ry\ImapClient\Protocol\Response\ResponseStatus;
 use D4ry\ImapClient\Protocol\Response\UntaggedResponse;
 use D4ry\ImapClient\Tests\Unit\Support\FakeConnection;
-use PHPUnit\Framework\Attributes\CoversClass;
-use PHPUnit\Framework\Attributes\UsesClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(ResponseParser::class)]
-#[UsesClass(Response::class)]
-#[UsesClass(UntaggedResponse::class)]
-#[UsesClass(FetchResponseParser::class)]
-#[UsesClass(\D4ry\ImapClient\Protocol\StreamingFetchState::class)]
-#[UsesClass(\D4ry\ImapClient\ValueObject\Uid::class)]
-#[UsesClass(\D4ry\ImapClient\ValueObject\FlagSet::class)]
+/**
+ * @covers \D4ry\ImapClient\Protocol\Response\ResponseParser
+ * @uses \D4ry\ImapClient\Protocol\Response\Response
+ * @uses \D4ry\ImapClient\Protocol\Response\UntaggedResponse
+ * @uses \D4ry\ImapClient\Protocol\Response\FetchResponseParser
+ * @uses \D4ry\ImapClient\Protocol\StreamingFetchState
+ * @uses \D4ry\ImapClient\ValueObject\Uid
+ * @uses \D4ry\ImapClient\ValueObject\FlagSet
+ */
 final class ResponseParserTest extends TestCase
 {
     private function makeParser(FakeConnection $connection): ResponseParser

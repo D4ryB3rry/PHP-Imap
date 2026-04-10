@@ -4,51 +4,32 @@ declare(strict_types=1);
 
 namespace D4ry\ImapClient\ValueObject;
 
-use D4ry\ImapClient\Enum\Flag;
-
-readonly class FlagSet
+class FlagSet
 {
     /** @var string[] */
     public array $flags;
 
     /**
-     * @param array<Flag|string> $flags
+     * @param string[] $flags
      */
     public function __construct(array $flags = [])
     {
-        $normalized = [];
-        foreach ($flags as $flag) {
-            $normalized[] = $flag instanceof Flag ? $flag->value : $flag;
-        }
-
-        $this->flags = array_unique($normalized);
+        $this->flags = array_values(array_unique($flags));
     }
 
-    public function has(Flag|string $flag): bool
+    public function has(string $flag): bool
     {
-        $value = $flag instanceof Flag ? $flag->value : $flag;
-
-        return in_array($value, $this->flags, true);
+        return in_array($flag, $this->flags, true);
     }
 
-    public function add(Flag|string ...$flags): self
+    public function add(string ...$flags): self
     {
-        $merged = $this->flags;
-        foreach ($flags as $flag) {
-            $merged[] = $flag instanceof Flag ? $flag->value : $flag;
-        }
-
-        return new self($merged);
+        return new self(array_merge($this->flags, $flags));
     }
 
-    public function remove(Flag|string ...$flags): self
+    public function remove(string ...$flags): self
     {
-        $remove = [];
-        foreach ($flags as $flag) {
-            $remove[] = $flag instanceof Flag ? $flag->value : $flag;
-        }
-
-        return new self(array_diff($this->flags, $remove));
+        return new self(array_diff($this->flags, $flags));
     }
 
     public function toImapString(): string

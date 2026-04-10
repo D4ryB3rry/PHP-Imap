@@ -23,7 +23,7 @@ class LoggingConnection implements ConnectionInterface
     /** @var resource */
     private $logHandle;
 
-    private readonly Redactor $redactor;
+    private Redactor $redactor;
 
     /**
      * @param ConnectionInterface $inner               The wrapped connection — receives unmodified bytes.
@@ -33,9 +33,9 @@ class LoggingConnection implements ConnectionInterface
      *                                                  only when you genuinely need raw credentials in the log.
      */
     public function __construct(
-        private readonly ConnectionInterface $inner,
+        private ConnectionInterface $inner,
         string $logPath,
-        private readonly bool $redactCredentials = true,
+        private bool $redactCredentials = true,
     ) {
         $handle = @fopen($logPath, 'ab');
 
@@ -48,9 +48,9 @@ class LoggingConnection implements ConnectionInterface
         $this->log('---', sprintf('session start pid=%d', (int) getmypid()));
     }
 
-    public function open(string $host, int $port, Encryption $encryption, float $timeout, array $sslOptions = []): void
+    public function open(string $host, int $port, string $encryption, float $timeout, array $sslOptions = []): void
     {
-        $this->log('OPEN', sprintf('%s:%d encryption=%s timeout=%.1f', $host, $port, $encryption->name, $timeout));
+        $this->log('OPEN', sprintf('%s:%d encryption=%s timeout=%.1f', $host, $port, Encryption::nameOf($encryption), $timeout));
 
         try {
             $this->inner->open($host, $port, $encryption, $timeout, $sslOptions);

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace D4ry\ImapClient\Contract;
 
 use D4ry\ImapClient\Collection\FolderCollection;
-use D4ry\ImapClient\Enum\Capability;
 use D4ry\ImapClient\Idle\IdleHandlerInterface;
 use D4ry\ImapClient\ValueObject\NamespaceInfo;
 
@@ -18,11 +17,11 @@ interface MailboxInterface
     public function inbox(): FolderInterface;
 
     /**
-     * @return Capability[]
+     * @return string[]
      */
     public function capabilities(): array;
 
-    public function hasCapability(Capability $capability): bool;
+    public function hasCapability(string $capability): bool;
 
     /**
      * @param array<string, string>|null $clientParams

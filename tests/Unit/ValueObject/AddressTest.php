@@ -5,10 +5,11 @@ declare(strict_types=1);
 namespace D4ry\ImapClient\Tests\Unit\ValueObject;
 
 use D4ry\ImapClient\ValueObject\Address;
-use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(Address::class)]
+/**
+ * @covers \D4ry\ImapClient\ValueObject\Address
+ */
 final class AddressTest extends TestCase
 {
     public function testEmailJoinsMailboxAndHost(): void

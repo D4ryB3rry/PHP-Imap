@@ -6,12 +6,12 @@ namespace D4ry\ImapClient\Tests\Unit\Protocol\Command;
 
 use D4ry\ImapClient\Protocol\Command\Command;
 use D4ry\ImapClient\ValueObject\Tag;
-use PHPUnit\Framework\Attributes\CoversClass;
-use PHPUnit\Framework\Attributes\UsesClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(Command::class)]
-#[UsesClass(Tag::class)]
+/**
+ * @covers \D4ry\ImapClient\Protocol\Command\Command
+ * @uses \D4ry\ImapClient\ValueObject\Tag
+ */
 final class CommandTest extends TestCase
 {
     public function testCompileWithoutArguments(): void

@@ -11,7 +11,7 @@ class RecentCountEvent extends IdleEvent
 {
     public function __construct(
         string $rawLine,
-        public readonly int $count,
+        public int $count,
     ) {
         parent::__construct($rawLine);
     }

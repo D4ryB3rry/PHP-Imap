@@ -12,18 +12,18 @@ use D4ry\ImapClient\Idle\MessageReceivedEvent;
 use D4ry\ImapClient\Idle\RecentCountEvent;
 use D4ry\ImapClient\ValueObject\FlagSet;
 use D4ry\ImapClient\Idle\IdleEvent;
-use PHPUnit\Framework\Attributes\CoversClass;
-use PHPUnit\Framework\Attributes\UsesClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(AbstractIdleHandler::class)]
-#[CoversClass(IdleEvent::class)]
-#[CoversClass(MessageReceivedEvent::class)]
-#[CoversClass(MessageExpungedEvent::class)]
-#[CoversClass(FlagsChangedEvent::class)]
-#[CoversClass(RecentCountEvent::class)]
-#[CoversClass(IdleHeartbeatEvent::class)]
-#[UsesClass(FlagSet::class)]
+/**
+ * @covers \D4ry\ImapClient\Idle\AbstractIdleHandler
+ * @covers \D4ry\ImapClient\Idle\IdleEvent
+ * @covers \D4ry\ImapClient\Idle\MessageReceivedEvent
+ * @covers \D4ry\ImapClient\Idle\MessageExpungedEvent
+ * @covers \D4ry\ImapClient\Idle\FlagsChangedEvent
+ * @covers \D4ry\ImapClient\Idle\RecentCountEvent
+ * @covers \D4ry\ImapClient\Idle\IdleHeartbeatEvent
+ * @uses \D4ry\ImapClient\ValueObject\FlagSet
+ */
 final class AbstractIdleHandlerTest extends TestCase
 {
     public function testDefaultHandlerReturnsTrueForAllEvents(): void
@@ -58,6 +58,6 @@ final class AbstractIdleHandlerTest extends TestCase
         $event = new MessageReceivedEvent('* 7 EXISTS', 7);
 
         self::assertSame(7, $event->messageCount);
-        self::assertSame(7, $event->sequenceNumber);
+        self::assertSame(7, $event->sequenceNumber());
     }
 }

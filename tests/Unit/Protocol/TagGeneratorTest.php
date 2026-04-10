@@ -6,11 +6,12 @@ namespace D4ry\ImapClient\Tests\Unit\Protocol;
 
 use D4ry\ImapClient\Protocol\TagGenerator;
 use D4ry\ImapClient\ValueObject\Tag;
-use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(TagGenerator::class)]
-#[CoversClass(Tag::class)]
+/**
+ * @covers \D4ry\ImapClient\Protocol\TagGenerator
+ * @covers \D4ry\ImapClient\ValueObject\Tag
+ */
 final class TagGeneratorTest extends TestCase
 {
     public function testTagsAreSequential(): void

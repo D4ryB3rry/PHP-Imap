@@ -11,7 +11,7 @@ use D4ry\ImapClient\Exception\ReadOnlyCollectionException;
  * @implements \IteratorAggregate<int, AttachmentInterface>
  * @implements \ArrayAccess<int, AttachmentInterface>
  */
-readonly class AttachmentCollection implements \IteratorAggregate, \Countable, \ArrayAccess
+class AttachmentCollection implements \IteratorAggregate, \Countable, \ArrayAccess
 {
     /**
      * @param AttachmentInterface[] $attachments

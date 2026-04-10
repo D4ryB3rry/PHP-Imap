@@ -6,7 +6,7 @@ namespace D4ry\ImapClient\Mime;
 
 use D4ry\ImapClient\Enum\ContentTransferEncoding;
 
-readonly class ParsedPart
+class ParsedPart
 {
     public function __construct(
         public string $mimeType,
@@ -15,7 +15,7 @@ readonly class ParsedPart
         public ?string $charset = null,
         public bool $isInline = false,
         public ?string $contentId = null,
-        public ContentTransferEncoding $encoding = ContentTransferEncoding::SevenBit,
+        public string $encoding = ContentTransferEncoding::SevenBit,
     ) {
     }
 }

@@ -9,11 +9,12 @@ use D4ry\ImapClient\Enum\Encryption;
 use D4ry\ImapClient\Exception\ConnectionException;
 use D4ry\ImapClient\Exception\TimeoutException;
 use D4ry\ImapClient\Tests\Unit\Support\LoopbackServer;
-use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use ReflectionProperty;
 
-#[CoversClass(SocketConnection::class)]
+/**
+ * @covers \D4ry\ImapClient\Connection\SocketConnection
+ */
 final class SocketConnectionTest extends TestCase
 {
     private LoopbackServer $server;

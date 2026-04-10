@@ -6,10 +6,11 @@ namespace D4ry\ImapClient\Tests\Unit\Support;
 
 use D4ry\ImapClient\Exception\ParseException;
 use D4ry\ImapClient\Support\ImapDateFormatter;
-use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(ImapDateFormatter::class)]
+/**
+ * @covers \D4ry\ImapClient\Support\ImapDateFormatter
+ */
 final class ImapDateFormatterTest extends TestCase
 {
     public function testToImapDate(): void

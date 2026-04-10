@@ -5,10 +5,11 @@ declare(strict_types=1);
 namespace D4ry\ImapClient\Tests\Unit\Support;
 
 use D4ry\ImapClient\Support\Literal;
-use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(Literal::class)]
+/**
+ * @covers \D4ry\ImapClient\Support\Literal
+ */
 final class LiteralTest extends TestCase
 {
     public function testSizeReturnsByteLength(): void

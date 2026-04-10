@@ -5,10 +5,11 @@ declare(strict_types=1);
 namespace D4ry\ImapClient\Tests\Unit\ValueObject;
 
 use D4ry\ImapClient\ValueObject\SequenceNumber;
-use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(SequenceNumber::class)]
+/**
+ * @covers \D4ry\ImapClient\ValueObject\SequenceNumber
+ */
 final class SequenceNumberTest extends TestCase
 {
     public function testStoresValue(): void
@@ -24,8 +25,4 @@ final class SequenceNumberTest extends TestCase
         self::assertSame('999', (string) new SequenceNumber(999));
     }
 
-    public function testIsReadonly(): void
-    {
-        self::assertTrue(new \ReflectionClass(SequenceNumber::class)->isReadOnly());
-    }
 }

@@ -5,10 +5,11 @@ declare(strict_types=1);
 namespace D4ry\ImapClient\Tests\Unit\ValueObject;
 
 use D4ry\ImapClient\ValueObject\Uid;
-use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(Uid::class)]
+/**
+ * @covers \D4ry\ImapClient\ValueObject\Uid
+ */
 final class UidTest extends TestCase
 {
     public function testValueAndStringCast(): void

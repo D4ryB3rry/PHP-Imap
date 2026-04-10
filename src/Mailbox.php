@@ -28,7 +28,7 @@ use D4ry\ImapClient\Protocol\Transceiver;
 use D4ry\ImapClient\ValueObject\MailboxPath;
 use D4ry\ImapClient\ValueObject\NamespaceInfo;
 
-readonly class Mailbox implements MailboxInterface
+class Mailbox implements MailboxInterface
 {
     private Transceiver $transceiver;
 
@@ -215,7 +215,7 @@ readonly class Mailbox implements MailboxInterface
             $config->host,
             $config->port,
             $waited,
-            $config->encryption->name,
+            Encryption::nameOf($config->encryption),
         );
 
         $suggestion = match ($config->encryption) {
@@ -226,6 +226,7 @@ readonly class Mailbox implements MailboxInterface
                 ' The TLS handshake completed but the server never sent an IMAP greeting.'
                 . ' The port may not be implicit-TLS — try Encryption::StartTls or Encryption::None,'
                 . ' or check that the port actually speaks IMAP.',
+            default => '',
         };
 
         return $base . $suggestion;
@@ -264,14 +265,14 @@ readonly class Mailbox implements MailboxInterface
     }
 
     /**
-     * @return Capability[]
+     * @return string[]
      */
     public function capabilities(): array
     {
         return $this->transceiver->capabilities();
     }
 
-    public function hasCapability(Capability $capability): bool
+    public function hasCapability(string $capability): bool
     {
         return $this->transceiver->hasCapability($capability);
     }

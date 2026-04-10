@@ -5,10 +5,11 @@ declare(strict_types=1);
 namespace D4ry\ImapClient\Tests\Unit\Protocol\Response;
 
 use D4ry\ImapClient\Protocol\Response\UntaggedResponse;
-use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(UntaggedResponse::class)]
+/**
+ * @covers \D4ry\ImapClient\Protocol\Response\UntaggedResponse
+ */
 final class UntaggedResponseTest extends TestCase
 {
     public function testDefaults(): void

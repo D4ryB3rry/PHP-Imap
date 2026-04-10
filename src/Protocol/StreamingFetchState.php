@@ -29,7 +29,7 @@ final class StreamingFetchState
 
     public bool $completed = false;
 
-    public function __construct(public readonly string $tag)
+    public function __construct(public string $tag)
     {
     }
 }

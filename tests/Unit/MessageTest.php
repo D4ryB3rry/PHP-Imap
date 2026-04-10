@@ -17,36 +17,36 @@ use D4ry\ImapClient\ValueObject\FlagSet;
 use D4ry\ImapClient\ValueObject\MailboxPath;
 use D4ry\ImapClient\ValueObject\SequenceNumber;
 use D4ry\ImapClient\ValueObject\Uid;
-use PHPUnit\Framework\Attributes\CoversClass;
-use PHPUnit\Framework\Attributes\UsesClass;
 use PHPUnit\Framework\TestCase;
 use ReflectionProperty;
 
-#[CoversClass(Message::class)]
-#[UsesClass(Transceiver::class)]
-#[UsesClass(\D4ry\ImapClient\Attachment::class)]
-#[UsesClass(AttachmentCollection::class)]
-#[UsesClass(MailboxPath::class)]
-#[UsesClass(Uid::class)]
-#[UsesClass(SequenceNumber::class)]
-#[UsesClass(FlagSet::class)]
-#[UsesClass(Envelope::class)]
-#[UsesClass(Address::class)]
-#[UsesClass(\D4ry\ImapClient\ValueObject\BodyStructure::class)]
-#[UsesClass(\D4ry\ImapClient\Mime\MimeParser::class)]
-#[UsesClass(\D4ry\ImapClient\Mime\HeaderDecoder::class)]
-#[UsesClass(\D4ry\ImapClient\Mime\ParsedMessage::class)]
-#[UsesClass(\D4ry\ImapClient\Protocol\Command\Command::class)]
-#[UsesClass(\D4ry\ImapClient\Protocol\Command\CommandBuilder::class)]
-#[UsesClass(\D4ry\ImapClient\Protocol\Response\Response::class)]
-#[UsesClass(\D4ry\ImapClient\Protocol\Response\ResponseParser::class)]
-#[UsesClass(\D4ry\ImapClient\Protocol\Response\FetchResponseParser::class)]
-#[UsesClass(\D4ry\ImapClient\Protocol\Response\UntaggedResponse::class)]
-#[UsesClass(\D4ry\ImapClient\Protocol\TagGenerator::class)]
-#[UsesClass(\D4ry\ImapClient\ValueObject\Tag::class)]
+/**
+ * @covers \D4ry\ImapClient\Message
+ * @uses \D4ry\ImapClient\Protocol\Transceiver
+ * @uses \D4ry\ImapClient\Attachment
+ * @uses \D4ry\ImapClient\Collection\AttachmentCollection
+ * @uses \D4ry\ImapClient\ValueObject\MailboxPath
+ * @uses \D4ry\ImapClient\ValueObject\Uid
+ * @uses \D4ry\ImapClient\ValueObject\SequenceNumber
+ * @uses \D4ry\ImapClient\ValueObject\FlagSet
+ * @uses \D4ry\ImapClient\ValueObject\Envelope
+ * @uses \D4ry\ImapClient\ValueObject\Address
+ * @uses \D4ry\ImapClient\ValueObject\BodyStructure
+ * @uses \D4ry\ImapClient\Mime\MimeParser
+ * @uses \D4ry\ImapClient\Mime\HeaderDecoder
+ * @uses \D4ry\ImapClient\Mime\ParsedMessage
+ * @uses \D4ry\ImapClient\Protocol\Command\Command
+ * @uses \D4ry\ImapClient\Protocol\Command\CommandBuilder
+ * @uses \D4ry\ImapClient\Protocol\Response\Response
+ * @uses \D4ry\ImapClient\Protocol\Response\ResponseParser
+ * @uses \D4ry\ImapClient\Protocol\Response\FetchResponseParser
+ * @uses \D4ry\ImapClient\Protocol\Response\UntaggedResponse
+ * @uses \D4ry\ImapClient\Protocol\TagGenerator
+ * @uses \D4ry\ImapClient\ValueObject\Tag
+ */
 final class MessageTest extends TestCase
 {
-    private function setCapabilities(Transceiver $transceiver, Capability ...$caps): void
+    private function setCapabilities(Transceiver $transceiver, string ...$caps): void
     {
         $prop = new ReflectionProperty(Transceiver::class, 'cachedCapabilities');
         $prop->setValue($transceiver, $caps);
@@ -55,7 +55,7 @@ final class MessageTest extends TestCase
     private function makeMessage(
         FakeConnection $connection,
         int $uid = 42,
-        FlagSet $flags = new FlagSet(),
+        ?FlagSet $flags = null,
         string $folderPath = 'INBOX',
         bool $preselect = true,
         array $caps = [],
@@ -72,7 +72,7 @@ final class MessageTest extends TestCase
             uid: new Uid($uid),
             sequenceNumber: new SequenceNumber(1),
             envelope: new Envelope(null, 'subject', [], [], [], [], [], [], null, null),
-            flags: $flags,
+            flags: $flags ?? new FlagSet(),
             internalDate: new \DateTimeImmutable('2024-01-01 12:00:00 +0000'),
             size: 1234,
             folderPath: $folderPath,
@@ -87,7 +87,7 @@ final class MessageTest extends TestCase
     public function testAccessors(): void
     {
         $connection = new FakeConnection();
-        [$message] = $this->makeMessage($connection, 42, new FlagSet([Flag::Seen->value]));
+        [$message] = $this->makeMessage($connection, 42, new FlagSet([Flag::Seen]));
 
         self::assertSame(42, $message->uid()->value);
         self::assertSame(1, $message->sequenceNumber()->value);
@@ -151,7 +151,7 @@ final class MessageTest extends TestCase
         $connection = new FakeConnection();
         $connection->queueLines('A0001 OK STORE done');
 
-        [$message] = $this->makeMessage($connection, 42, new FlagSet([Flag::Seen->value]));
+        [$message] = $this->makeMessage($connection, 42, new FlagSet([Flag::Seen]));
 
         $message->clearFlag(Flag::Seen);
 

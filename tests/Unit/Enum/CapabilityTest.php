@@ -5,10 +5,11 @@ declare(strict_types=1);
 namespace D4ry\ImapClient\Tests\Unit\Enum;
 
 use D4ry\ImapClient\Enum\Capability;
-use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(Capability::class)]
+/**
+ * @covers \D4ry\ImapClient\Enum\Capability
+ */
 final class CapabilityTest extends TestCase
 {
     public function testKnownCapabilitiesResolveFromString(): void

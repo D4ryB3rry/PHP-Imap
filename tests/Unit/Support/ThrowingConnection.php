@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace D4ry\ImapClient\Tests\Unit\Support;
 
 use D4ry\ImapClient\Connection\Contract\ConnectionInterface;
-use D4ry\ImapClient\Enum\Encryption;
 use D4ry\ImapClient\Exception\ConnectionException;
 use Throwable;
 
@@ -15,12 +14,14 @@ use Throwable;
  */
 final class ThrowingConnection implements ConnectionInterface
 {
-    public function __construct(
-        private readonly Throwable $error = new ConnectionException('boom'),
-    ) {
+    private Throwable $error;
+
+    public function __construct(?Throwable $error = null)
+    {
+        $this->error = $error ?? new ConnectionException('boom');
     }
 
-    public function open(string $host, int $port, Encryption $encryption, float $timeout, array $sslOptions = []): void
+    public function open(string $host, int $port, string $encryption, float $timeout, array $sslOptions = []): void
     {
         throw $this->error;
     }

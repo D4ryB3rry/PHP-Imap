@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace D4ry\ImapClient\ValueObject;
 
-readonly class Envelope
+class Envelope
 {
     /**
      * @param Address[] $from

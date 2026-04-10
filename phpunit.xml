@@ -3,13 +3,9 @@
          xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
          bootstrap="tests/bootstrap.php"
          colors="true"
-         cacheDirectory=".phpunit.cache"
          executionOrder="depends,defects"
-         requireCoverageMetadata="true"
-         beStrictAboutCoverageMetadata="true"
          beStrictAboutOutputDuringTests="true"
          failOnWarning="true"
-         failOnNotice="true"
          failOnRisky="true">
     <testsuites>
         <testsuite name="unit">
@@ -20,13 +16,10 @@
         </testsuite>
     </testsuites>
 
-    <source>
-        <include>
-            <directory>src</directory>
-        </include>
-    </source>
-
     <coverage>
+        <include>
+            <directory suffix=".php">src</directory>
+        </include>
         <report>
             <html outputDirectory="build/coverage/html"/>
             <text outputFile="build/coverage/coverage.txt" showOnlySummary="true"/>

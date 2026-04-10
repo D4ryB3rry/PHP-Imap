@@ -6,7 +6,7 @@ namespace D4ry\ImapClient\Protocol\Command;
 
 use D4ry\ImapClient\ValueObject\Tag;
 
-readonly class Command
+class Command
 {
     /**
      * @param string[] $arguments

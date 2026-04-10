@@ -208,7 +208,7 @@ class MimeParser implements MimeParserInterface
      * @param array<string, string[]> $headers
      */
     /** @infection-ignore-all */
-    private function getTransferEncoding(array $headers): ContentTransferEncoding
+    private function getTransferEncoding(array $headers): string
     {
         $value = $this->getHeaderValue($headers, 'Content-Transfer-Encoding');
         if ($value === null) {
@@ -219,7 +219,7 @@ class MimeParser implements MimeParserInterface
     }
 
     /** @infection-ignore-all */
-    private function decodeContent(string $content, ContentTransferEncoding $encoding): string
+    private function decodeContent(string $content, string $encoding): string
     {
         return match ($encoding) {
             ContentTransferEncoding::Base64 => base64_decode(str_replace(["\r", "\n"], '', $content), true) ?: '',

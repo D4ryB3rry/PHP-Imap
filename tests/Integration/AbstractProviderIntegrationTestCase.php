@@ -12,7 +12,6 @@ use D4ry\ImapClient\Search\Search;
 use D4ry\ImapClient\Search\SearchResult;
 use D4ry\ImapClient\ValueObject\Envelope;
 use D4ry\ImapClient\ValueObject\Uid;
-use PHPUnit\Framework\Attributes\CoversNothing;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -103,7 +102,9 @@ abstract class AbstractProviderIntegrationTestCase extends TestCase
         return Mailbox::connect($config);
     }
 
-    #[CoversNothing]
+    /**
+     * @coversNothing
+     */
     final public function testCanConnect(): void
     {
         $mailbox = $this->connect();
@@ -119,7 +120,9 @@ abstract class AbstractProviderIntegrationTestCase extends TestCase
         }
     }
 
-    #[CoversNothing]
+    /**
+     * @coversNothing
+     */
     final public function testListsFolders(): void
     {
         $mailbox = $this->connect();
@@ -143,7 +146,9 @@ abstract class AbstractProviderIntegrationTestCase extends TestCase
         }
     }
 
-    #[CoversNothing]
+    /**
+     * @coversNothing
+     */
     final public function testFetchesLatestMessage(): void
     {
         $mailbox = $this->connect();
@@ -156,7 +161,7 @@ abstract class AbstractProviderIntegrationTestCase extends TestCase
                 self::markTestSkipped('INBOX is empty — cannot fetch a latest message.');
             }
 
-            $result = $inbox->search(new Search()->all());
+            $result = $inbox->search((new Search())->all());
             self::assertNotEmpty($result->uids, 'INBOX SEARCH ALL returned no UIDs despite non-zero MESSAGES count.');
 
             $latestUid = $result->uids[array_key_last($result->uids)];
@@ -172,7 +177,9 @@ abstract class AbstractProviderIntegrationTestCase extends TestCase
         }
     }
 
-    #[CoversNothing]
+    /**
+     * @coversNothing
+     */
     final public function testSearchUnread(): void
     {
         $mailbox = $this->connect();
@@ -181,7 +188,7 @@ abstract class AbstractProviderIntegrationTestCase extends TestCase
             $inbox = $mailbox->inbox();
             $inbox->examine();
 
-            $result = $inbox->search(new Search()->unread());
+            $result = $inbox->search((new Search())->unread());
 
             self::assertInstanceOf(SearchResult::class, $result);
             foreach ($result->uids as $uid) {

@@ -27,7 +27,7 @@ class MessageCollection implements \IteratorAggregate, \Countable, \ArrayAccess
      * UID FETCH path.
      */
     public function __construct(
-        private readonly \Closure $loader,
+        private \Closure $loader,
     ) {
     }
 

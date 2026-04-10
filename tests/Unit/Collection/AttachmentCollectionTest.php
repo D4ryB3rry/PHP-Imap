@@ -7,12 +7,12 @@ namespace D4ry\ImapClient\Tests\Unit\Collection;
 use D4ry\ImapClient\Collection\AttachmentCollection;
 use D4ry\ImapClient\Contract\AttachmentInterface;
 use D4ry\ImapClient\Exception\ReadOnlyCollectionException;
-use PHPUnit\Framework\Attributes\CoversClass;
-use PHPUnit\Framework\Attributes\UsesClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(AttachmentCollection::class)]
-#[UsesClass(ReadOnlyCollectionException::class)]
+/**
+ * @covers \D4ry\ImapClient\Collection\AttachmentCollection
+ * @uses \D4ry\ImapClient\Exception\ReadOnlyCollectionException
+ */
 final class AttachmentCollectionTest extends TestCase
 {
     private function makeAttachment(bool $inline): AttachmentInterface

@@ -12,17 +12,17 @@ use D4ry\ImapClient\ValueObject\BodyStructure;
 use D4ry\ImapClient\ValueObject\Envelope;
 use D4ry\ImapClient\ValueObject\FlagSet;
 use D4ry\ImapClient\ValueObject\Uid;
-use PHPUnit\Framework\Attributes\CoversClass;
-use PHPUnit\Framework\Attributes\UsesClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(FetchResponseParser::class)]
-#[UsesClass(HeaderDecoder::class)]
-#[UsesClass(Address::class)]
-#[UsesClass(BodyStructure::class)]
-#[UsesClass(Envelope::class)]
-#[UsesClass(Uid::class)]
-#[UsesClass(FlagSet::class)]
+/**
+ * @covers \D4ry\ImapClient\Protocol\Response\FetchResponseParser
+ * @uses \D4ry\ImapClient\Mime\HeaderDecoder
+ * @uses \D4ry\ImapClient\ValueObject\Address
+ * @uses \D4ry\ImapClient\ValueObject\BodyStructure
+ * @uses \D4ry\ImapClient\ValueObject\Envelope
+ * @uses \D4ry\ImapClient\ValueObject\Uid
+ * @uses \D4ry\ImapClient\ValueObject\FlagSet
+ */
 final class FetchResponseParserTest extends TestCase
 {
     public function testParsesUidAndSize(): void

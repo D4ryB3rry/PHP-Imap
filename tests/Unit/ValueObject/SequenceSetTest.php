@@ -5,10 +5,11 @@ declare(strict_types=1);
 namespace D4ry\ImapClient\Tests\Unit\ValueObject;
 
 use D4ry\ImapClient\ValueObject\SequenceSet;
-use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(SequenceSet::class)]
+/**
+ * @covers \D4ry\ImapClient\ValueObject\SequenceSet
+ */
 final class SequenceSetTest extends TestCase
 {
     public function testSingle(): void

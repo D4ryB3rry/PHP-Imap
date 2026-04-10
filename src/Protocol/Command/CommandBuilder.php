@@ -19,7 +19,7 @@ class CommandBuilder
     private array $literals = [];
 
     public function __construct(
-        private readonly TagGenerator $tagGenerator,
+        private TagGenerator $tagGenerator,
     ) {
     }
 

@@ -11,7 +11,7 @@ class IdleHeartbeatEvent extends IdleEvent
 {
     public function __construct(
         string $rawLine,
-        public readonly string $text,
+        public string $text,
     ) {
         parent::__construct($rawLine);
     }

@@ -5,19 +5,35 @@ declare(strict_types=1);
 namespace D4ry\ImapClient\Tests\Unit\Enum;
 
 use D4ry\ImapClient\Enum\Flag;
-use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(Flag::class)]
+/**
+ * @covers \D4ry\ImapClient\Enum\Flag
+ */
 final class FlagTest extends TestCase
 {
-    public function testImapStringMatchesValue(): void
+    public function testConstantsMatchExpectedValues(): void
     {
-        self::assertSame('\\Seen', Flag::Seen->imapString());
-        self::assertSame('\\Answered', Flag::Answered->imapString());
-        self::assertSame('\\Flagged', Flag::Flagged->imapString());
-        self::assertSame('\\Deleted', Flag::Deleted->imapString());
-        self::assertSame('\\Draft', Flag::Draft->imapString());
-        self::assertSame('\\Recent', Flag::Recent->imapString());
+        self::assertSame('\\Seen', Flag::Seen);
+        self::assertSame('\\Answered', Flag::Answered);
+        self::assertSame('\\Flagged', Flag::Flagged);
+        self::assertSame('\\Deleted', Flag::Deleted);
+        self::assertSame('\\Draft', Flag::Draft);
+        self::assertSame('\\Recent', Flag::Recent);
+    }
+
+    public function testFromReturnsValue(): void
+    {
+        self::assertSame(Flag::Seen, Flag::from('\\Seen'));
+    }
+
+    public function testTryFromReturnsNullForUnknown(): void
+    {
+        self::assertNull(Flag::tryFrom('\\Unknown'));
+    }
+
+    public function testCasesReturnsAll(): void
+    {
+        self::assertCount(6, Flag::cases());
     }
 }

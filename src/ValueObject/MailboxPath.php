@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace D4ry\ImapClient\ValueObject;
 
-readonly class MailboxPath
+class MailboxPath
 {
     public function __construct(
         public string $path,

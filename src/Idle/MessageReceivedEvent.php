@@ -15,7 +15,7 @@ class MessageReceivedEvent extends IdleEvent
      */
     public function __construct(
         string $rawLine,
-        public readonly int $messageCount,
+        public int $messageCount,
     ) {
         parent::__construct($rawLine);
     }
@@ -26,7 +26,8 @@ class MessageReceivedEvent extends IdleEvent
      * In IMAP, EXISTS always reports the new total count,
      * and the new message is always assigned the highest sequence number.
      */
-    public int $sequenceNumber {
-        get => $this->messageCount;
+    public function sequenceNumber(): int
+    {
+        return $this->messageCount;
     }
 }

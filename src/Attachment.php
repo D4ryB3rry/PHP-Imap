@@ -15,10 +15,10 @@ class Attachment implements AttachmentInterface
     private ?string $cachedContent = null;
 
     public function __construct(
-        private readonly Transceiver $transceiver,
-        private readonly Uid $messageUid,
-        private readonly BodyStructure $structure,
-        private readonly string $folderPath,
+        private Transceiver $transceiver,
+        private Uid $messageUid,
+        private BodyStructure $structure,
+        private string $folderPath,
     ) {
     }
 
@@ -187,7 +187,7 @@ class Attachment implements AttachmentInterface
         }
     }
 
-    public function encoding(): ?ContentTransferEncoding
+    public function encoding(): ?string
     {
         return $this->structure->encoding;
     }

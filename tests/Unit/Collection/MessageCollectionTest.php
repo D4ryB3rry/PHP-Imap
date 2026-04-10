@@ -7,12 +7,12 @@ namespace D4ry\ImapClient\Tests\Unit\Collection;
 use D4ry\ImapClient\Collection\MessageCollection;
 use D4ry\ImapClient\Contract\MessageInterface;
 use D4ry\ImapClient\Exception\ReadOnlyCollectionException;
-use PHPUnit\Framework\Attributes\CoversClass;
-use PHPUnit\Framework\Attributes\UsesClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(MessageCollection::class)]
-#[UsesClass(ReadOnlyCollectionException::class)]
+/**
+ * @covers \D4ry\ImapClient\Collection\MessageCollection
+ * @uses \D4ry\ImapClient\Exception\ReadOnlyCollectionException
+ */
 final class MessageCollectionTest extends TestCase
 {
     public function testLazyLoaderInvokedOnce(): void

@@ -5,16 +5,19 @@ declare(strict_types=1);
 namespace D4ry\ImapClient\Tests\Unit\Connection;
 
 use D4ry\ImapClient\Connection\RecordingConnection;
+use D4ry\ImapClient\Connection\Redactor;
 use D4ry\ImapClient\Connection\ReplayConnection;
 use D4ry\ImapClient\Enum\Encryption;
 use D4ry\ImapClient\Exception\ConnectionException;
 use D4ry\ImapClient\Exception\ReplayMismatchException;
 use D4ry\ImapClient\Tests\Unit\Support\FakeConnection;
-use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(ReplayConnection::class)]
-#[CoversClass(RecordingConnection::class)]
+/**
+ * @covers \D4ry\ImapClient\Connection\ReplayConnection
+ * @covers \D4ry\ImapClient\Connection\RecordingConnection
+ * @covers \D4ry\ImapClient\Connection\Redactor
+ */
 final class ReplayConnectionTest extends TestCase
 {
     private string $recordPath;
@@ -73,6 +76,38 @@ final class ReplayConnectionTest extends TestCase
 
         self::assertCount(1, $replay->mismatches);
         self::assertStringContainsString('write mismatch', $replay->mismatches[0]);
+    }
+
+    public function testRedactedLoginLineIsAcceptedFromLiveCredential(): void
+    {
+        $this->writeJsonl([
+            ['t' => 'open', 'host' => 'h', 'port' => 993, 'encryption' => 'Tls', 'timeout' => 5.0],
+            ['t' => 'open_ok'],
+            ['t' => 'write', 'data' => "a01 LOGIN *** ***\r\n"],
+        ]);
+
+        $replay = new ReplayConnection($this->recordPath);
+        $replay->open('h', 993, Encryption::Tls, 5.0);
+        $replay->write("a01 LOGIN user@example.com s3cret!\r\n");
+
+        self::assertSame([], $replay->mismatches);
+    }
+
+    public function testRedactedAuthContinuationPayloadIsAcceptedFromLiveCredential(): void
+    {
+        $this->writeJsonl([
+            ['t' => 'open', 'host' => 'h', 'port' => 993, 'encryption' => 'Tls', 'timeout' => 5.0],
+            ['t' => 'open_ok'],
+            ['t' => 'write', 'data' => "a01 AUTHENTICATE PLAIN\r\n"],
+            ['t' => 'write', 'data' => "*** [redacted auth payload]\r\n"],
+        ]);
+
+        $replay = new ReplayConnection($this->recordPath);
+        $replay->open('h', 993, Encryption::Tls, 5.0);
+        $replay->write("a01 AUTHENTICATE PLAIN\r\n");
+        $replay->write("AHVzZXIAcGFzcw==\r\n");
+
+        self::assertSame([], $replay->mismatches);
     }
 
     public function testReadBytesCountMismatchThrows(): void

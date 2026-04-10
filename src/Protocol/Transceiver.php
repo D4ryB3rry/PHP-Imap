@@ -18,10 +18,10 @@ use D4ry\ImapClient\Protocol\Response\UntaggedResponse;
 
 class Transceiver implements TransceiverInterface
 {
-    private readonly ResponseParser $parser;
-    private readonly TagGenerator $tagGenerator;
+    private ResponseParser $parser;
+    private TagGenerator $tagGenerator;
 
-    /** @var Capability[] */
+    /** @var string[] */
     private array $cachedCapabilities = [];
 
     private int $capabilitiesGeneration = 0;
@@ -41,25 +41,11 @@ class Transceiver implements TransceiverInterface
      */
     public bool $objectIdFetchItemsDisabled = false;
 
-    public ?string $selectedMailbox = null {
-        get {
-            return $this->selectedMailbox;
-        }
-        set {
-            $this->selectedMailbox = $value;
-        }
-    }
-    public bool $utf8Enabled = false {
-        get {
-            return $this->utf8Enabled;
-        }
-        set {
-            $this->utf8Enabled = $value;
-        }
-    }
+    public ?string $selectedMailbox = null;
+    public bool $utf8Enabled = false;
 
     public function __construct(
-        private readonly ConnectionInterface $connection,
+        private ConnectionInterface $connection,
     ) {
         $this->tagGenerator = new TagGenerator();
         $this->parser = new ResponseParser($this->connection);
@@ -89,7 +75,7 @@ class Transceiver implements TransceiverInterface
                 tag: $tag->value,
                 command: $name,
                 responseText: $response->text,
-                status: $response->status->value,
+                status: $response->status,
             );
         }
 
@@ -143,7 +129,7 @@ class Transceiver implements TransceiverInterface
                 tag: $tag->value,
                 command: $name,
                 responseText: $response->text,
-                status: $response->status->value,
+                status: $response->status,
             );
         }
 
@@ -215,7 +201,7 @@ class Transceiver implements TransceiverInterface
                     tag: $tag->value,
                     command: $name,
                     responseText: $response->text,
-                    status: $response->status->value,
+                    status: $response->status,
                 );
             }
 
@@ -280,7 +266,7 @@ class Transceiver implements TransceiverInterface
                 tag: $tag->value,
                 command: explode(' ', $rawLine)[0] ?? '',
                 responseText: $response->text,
-                status: $response->status->value,
+                status: $response->status,
             );
         }
 
@@ -313,7 +299,7 @@ class Transceiver implements TransceiverInterface
     }
 
     /**
-     * @return Capability[]
+     * @return string[]
      */
     public function capabilities(): array
     {
@@ -326,14 +312,14 @@ class Transceiver implements TransceiverInterface
         return $this->cachedCapabilities;
     }
 
-    public function hasCapability(Capability $capability): bool
+    public function hasCapability(string $capability): bool
     {
         $caps = $this->capabilities();
 
         return in_array($capability, $caps, true);
     }
 
-    public function requireCapability(Capability $capability): void
+    public function requireCapability(string $capability): void
     {
         if (!$this->hasCapability($capability)) {
             throw new CapabilityException($capability);
@@ -409,7 +395,7 @@ class Transceiver implements TransceiverInterface
 
     /**
      * @param string[] $strings
-     * @return Capability[]
+     * @return string[]
      */
     /**
      * @infection-ignore-all

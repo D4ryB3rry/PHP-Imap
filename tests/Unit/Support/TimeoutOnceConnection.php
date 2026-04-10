@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace D4ry\ImapClient\Tests\Unit\Support;
 
 use D4ry\ImapClient\Connection\Contract\ConnectionInterface;
-use D4ry\ImapClient\Enum\Encryption;
 use D4ry\ImapClient\Exception\TimeoutException;
 
 /**
@@ -18,12 +17,12 @@ final class TimeoutOnceConnection implements ConnectionInterface
     private int $callIndex = 0;
 
     public function __construct(
-        public readonly FakeConnection $inner,
-        public readonly int $throwOnCall = 1,
+        public FakeConnection $inner,
+        public int $throwOnCall = 1,
     ) {
     }
 
-    public function open(string $host, int $port, Encryption $encryption, float $timeout, array $sslOptions = []): void
+    public function open(string $host, int $port, string $encryption, float $timeout, array $sslOptions = []): void
     {
         $this->inner->open($host, $port, $encryption, $timeout, $sslOptions);
     }

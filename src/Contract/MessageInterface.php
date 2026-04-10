@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace D4ry\ImapClient\Contract;
 
 use D4ry\ImapClient\Collection\AttachmentCollection;
-use D4ry\ImapClient\Enum\Flag;
 use D4ry\ImapClient\ValueObject\BodyStructure;
 use D4ry\ImapClient\ValueObject\Envelope;
 use D4ry\ImapClient\ValueObject\FlagSet;
@@ -47,9 +46,9 @@ interface MessageInterface
 
     public function save(string $path): void;
 
-    public function setFlag(Flag ...$flags): void;
+    public function setFlag(string ...$flags): void;
 
-    public function clearFlag(Flag ...$flags): void;
+    public function clearFlag(string ...$flags): void;
 
     public function moveTo(FolderInterface|string $folder): void;
 

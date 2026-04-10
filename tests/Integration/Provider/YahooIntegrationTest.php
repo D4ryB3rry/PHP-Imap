@@ -6,8 +6,10 @@ namespace D4ry\ImapClient\Tests\Integration\Provider;
 
 use D4ry\ImapClient\Tests\Integration\AbstractProviderIntegrationTestCase;
 
-#[\PHPUnit\Framework\Attributes\Group('integration')]
-#[\PHPUnit\Framework\Attributes\Group('provider-yahoo')]
+/**
+ * @group integration
+ * @group provider-yahoo
+ */
 final class YahooIntegrationTest extends AbstractProviderIntegrationTestCase
 {
     protected function envPrefix(): string

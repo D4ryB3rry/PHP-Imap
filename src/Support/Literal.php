@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace D4ry\ImapClient\Support;
 
-readonly class Literal
+class Literal
 {
     public function __construct(
         public string $data,

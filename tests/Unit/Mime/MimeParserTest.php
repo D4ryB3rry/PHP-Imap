@@ -8,14 +8,14 @@ use D4ry\ImapClient\Mime\HeaderDecoder;
 use D4ry\ImapClient\Mime\MimeParser;
 use D4ry\ImapClient\Mime\ParsedMessage;
 use D4ry\ImapClient\Mime\ParsedPart;
-use PHPUnit\Framework\Attributes\CoversClass;
-use PHPUnit\Framework\Attributes\UsesClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(MimeParser::class)]
-#[CoversClass(ParsedMessage::class)]
-#[CoversClass(ParsedPart::class)]
-#[UsesClass(HeaderDecoder::class)]
+/**
+ * @covers \D4ry\ImapClient\Mime\MimeParser
+ * @covers \D4ry\ImapClient\Mime\ParsedMessage
+ * @covers \D4ry\ImapClient\Mime\ParsedPart
+ * @uses \D4ry\ImapClient\Mime\HeaderDecoder
+ */
 final class MimeParserTest extends TestCase
 {
     public function testParsesSimpleTextMessage(): void

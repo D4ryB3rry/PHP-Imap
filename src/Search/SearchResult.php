@@ -6,7 +6,7 @@ namespace D4ry\ImapClient\Search;
 
 use D4ry\ImapClient\ValueObject\Uid;
 
-readonly class SearchResult
+class SearchResult
 {
     /**
      * @param Uid[] $uids

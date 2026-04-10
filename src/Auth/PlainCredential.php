@@ -11,8 +11,8 @@ use D4ry\ImapClient\Protocol\Transceiver;
 class PlainCredential extends Credential
 {
     public function __construct(
-        public readonly string $username,
-        public readonly string $password,
+        public string $username,
+        public string $password,
     ) {
     }
 

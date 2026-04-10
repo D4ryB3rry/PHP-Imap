@@ -45,12 +45,12 @@ class RecordingConnection implements ConnectionInterface
     /** @var resource */
     private $recordHandle;
 
-    private readonly Redactor $redactor;
+    private Redactor $redactor;
 
     public function __construct(
-        private readonly ConnectionInterface $inner,
+        private ConnectionInterface $inner,
         string $recordPath,
-        private readonly bool $redactCredentials = true,
+        private bool $redactCredentials = true,
     ) {
         $handle = @fopen($recordPath, 'ab');
 
@@ -62,13 +62,13 @@ class RecordingConnection implements ConnectionInterface
         $this->redactor = new Redactor();
     }
 
-    public function open(string $host, int $port, Encryption $encryption, float $timeout, array $sslOptions = []): void
+    public function open(string $host, int $port, string $encryption, float $timeout, array $sslOptions = []): void
     {
         $this->record([
             't' => 'open',
             'host' => $host,
             'port' => $port,
-            'encryption' => $encryption->name,
+            'encryption' => Encryption::nameOf($encryption),
             'timeout' => $timeout,
         ]);
 

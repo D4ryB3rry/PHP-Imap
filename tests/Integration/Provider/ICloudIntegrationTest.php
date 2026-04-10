@@ -6,8 +6,10 @@ namespace D4ry\ImapClient\Tests\Integration\Provider;
 
 use D4ry\ImapClient\Tests\Integration\AbstractProviderIntegrationTestCase;
 
-#[\PHPUnit\Framework\Attributes\Group('integration')]
-#[\PHPUnit\Framework\Attributes\Group('provider-icloud')]
+/**
+ * @group integration
+ * @group provider-icloud
+ */
 final class ICloudIntegrationTest extends AbstractProviderIntegrationTestCase
 {
     protected function envPrefix(): string

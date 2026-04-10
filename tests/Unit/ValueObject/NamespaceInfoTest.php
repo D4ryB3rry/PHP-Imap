@@ -5,10 +5,11 @@ declare(strict_types=1);
 namespace D4ry\ImapClient\Tests\Unit\ValueObject;
 
 use D4ry\ImapClient\ValueObject\NamespaceInfo;
-use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(NamespaceInfo::class)]
+/**
+ * @covers \D4ry\ImapClient\ValueObject\NamespaceInfo
+ */
 final class NamespaceInfoTest extends TestCase
 {
     public function testDefaultsToEmptyArrays(): void
@@ -47,8 +48,4 @@ final class NamespaceInfoTest extends TestCase
         self::assertSame($shared, $info->shared);
     }
 
-    public function testIsReadonly(): void
-    {
-        self::assertTrue(new \ReflectionClass(NamespaceInfo::class)->isReadOnly());
-    }
 }

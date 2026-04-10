@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace D4ry\ImapClient\Protocol\Contract;
 
-use D4ry\ImapClient\Enum\Capability;
 use D4ry\ImapClient\Protocol\Response\Response;
 
 interface TransceiverInterface
@@ -14,20 +13,15 @@ interface TransceiverInterface
     public function commandRaw(string $rawLine): Response;
 
     /**
-     * @return Capability[]
+     * @return string[]
      */
     public function capabilities(): array;
 
-    public function hasCapability(Capability $capability): bool;
+    public function hasCapability(string $capability): bool;
 
-    public function requireCapability(Capability $capability): void;
+    public function requireCapability(string $capability): void;
 
     public function sendContinuationData(string $data): void;
-
-    public null|string $selectedMailbox {
-        get;
-        set;
-    }
 
     public function isUtf8Enabled(): bool;
 }

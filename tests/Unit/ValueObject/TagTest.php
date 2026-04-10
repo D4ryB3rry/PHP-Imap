@@ -5,10 +5,11 @@ declare(strict_types=1);
 namespace D4ry\ImapClient\Tests\Unit\ValueObject;
 
 use D4ry\ImapClient\ValueObject\Tag;
-use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(Tag::class)]
+/**
+ * @covers \D4ry\ImapClient\ValueObject\Tag
+ */
 final class TagTest extends TestCase
 {
     public function testStoresValue(): void
@@ -32,8 +33,4 @@ final class TagTest extends TestCase
         self::assertSame('', (string) $tag);
     }
 
-    public function testIsReadonly(): void
-    {
-        self::assertTrue(new \ReflectionClass(Tag::class)->isReadOnly());
-    }
 }

@@ -5,10 +5,11 @@ declare(strict_types=1);
 namespace D4ry\ImapClient\Tests\Unit\ValueObject;
 
 use D4ry\ImapClient\ValueObject\MailboxPath;
-use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(MailboxPath::class)]
+/**
+ * @covers \D4ry\ImapClient\ValueObject\MailboxPath
+ */
 final class MailboxPathTest extends TestCase
 {
     public function testNameReturnsLastSegment(): void

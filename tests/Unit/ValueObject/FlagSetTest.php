@@ -6,10 +6,11 @@ namespace D4ry\ImapClient\Tests\Unit\ValueObject;
 
 use D4ry\ImapClient\Enum\Flag;
 use D4ry\ImapClient\ValueObject\FlagSet;
-use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(FlagSet::class)]
+/**
+ * @covers \D4ry\ImapClient\ValueObject\FlagSet
+ */
 final class FlagSetTest extends TestCase
 {
     public function testEmptyByDefault(): void

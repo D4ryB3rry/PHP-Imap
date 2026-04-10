@@ -26,7 +26,7 @@ class SocketConnection implements ConnectionInterface
 
     private float $timeout = 30.0;
 
-    public function open(string $host, int $port, Encryption $encryption, float $timeout, array $sslOptions = []): void
+    public function open(string $host, int $port, string $encryption, float $timeout, array $sslOptions = []): void
     {
         $this->timeout = $timeout;
 

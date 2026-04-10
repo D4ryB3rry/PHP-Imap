@@ -11,7 +11,7 @@ class MessageExpungedEvent extends IdleEvent
 {
     public function __construct(
         string $rawLine,
-        public readonly int $sequenceNumber,
+        public int $sequenceNumber,
     ) {
         parent::__construct($rawLine);
     }

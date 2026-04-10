@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace D4ry\ImapClient\ValueObject;
 
-readonly class NamespaceInfo
+class NamespaceInfo
 {
     /**
      * @param array<array{prefix: string, delimiter: string}> $personal

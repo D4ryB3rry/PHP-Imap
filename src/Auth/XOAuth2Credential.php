@@ -12,9 +12,9 @@ use D4ry\ImapClient\Protocol\Transceiver;
 class XOAuth2Credential extends Credential
 {
     public function __construct(
-        public readonly string $email,
+        public string $email,
         public string $accessToken,
-        public readonly ?TokenRefresherInterface $tokenRefresher = null,
+        public ?TokenRefresherInterface $tokenRefresher = null,
     ) {
     }
 

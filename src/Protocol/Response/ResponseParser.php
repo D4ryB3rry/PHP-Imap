@@ -26,7 +26,7 @@ class ResponseParser
     private $literalSink = null;
 
     public function __construct(
-        private readonly ConnectionInterface $connection,
+        private ConnectionInterface $connection,
     ) {
     }
 

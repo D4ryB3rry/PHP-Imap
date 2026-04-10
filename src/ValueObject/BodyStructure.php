@@ -4,9 +4,7 @@ declare(strict_types=1);
 
 namespace D4ry\ImapClient\ValueObject;
 
-use D4ry\ImapClient\Enum\ContentTransferEncoding;
-
-readonly class BodyStructure
+class BodyStructure
 {
     /**
      * @param array<string, string> $parameters
@@ -18,7 +16,7 @@ readonly class BodyStructure
         public array $parameters = [],
         public ?string $id = null,
         public ?string $description = null,
-        public ?ContentTransferEncoding $encoding = null,
+        public ?string $encoding = null,
         public int $size = 0,
         public array $parts = [],
         public ?string $disposition = null,

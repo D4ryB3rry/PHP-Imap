@@ -8,7 +8,6 @@ use D4ry\ImapClient\Collection\FolderCollection;
 use D4ry\ImapClient\Collection\MessageCollection;
 use D4ry\ImapClient\Contract\FolderInterface;
 use D4ry\ImapClient\Contract\MessageInterface;
-use D4ry\ImapClient\Enum\Flag;
 use D4ry\ImapClient\Enum\SpecialUse;
 use D4ry\ImapClient\Enum\StatusAttribute;
 use D4ry\ImapClient\Protocol\Command\CommandBuilder;
@@ -29,10 +28,10 @@ class Folder implements FolderInterface
     private ?MailboxStatus $cachedStatus = null;
 
     public function __construct(
-        private readonly Transceiver $transceiver,
+        private Transceiver $transceiver,
         private MailboxPath $mailboxPath,
-        private readonly ?SpecialUse $specialUseAttr = null,
-        private readonly array $attributes = [],
+        private ?string $specialUseAttr = null,
+        private array $attributes = [],
     ) {
     }
 
@@ -55,19 +54,19 @@ class Folder implements FolderInterface
         $encoded = $this->encodedPath();
 
         $attrs = [
-            StatusAttribute::Messages->value,
-            StatusAttribute::Recent->value,
-            StatusAttribute::UidNext->value,
-            StatusAttribute::UidValidity->value,
-            StatusAttribute::Unseen->value,
+            StatusAttribute::Messages,
+            StatusAttribute::Recent,
+            StatusAttribute::UidNext,
+            StatusAttribute::UidValidity,
+            StatusAttribute::Unseen,
         ];
 
         if ($this->transceiver->hasCapability(\D4ry\ImapClient\Enum\Capability::Condstore)) {
-            $attrs[] = StatusAttribute::HighestModSeq->value;
+            $attrs[] = StatusAttribute::HighestModSeq;
         }
 
         if ($this->transceiver->hasCapability(\D4ry\ImapClient\Enum\Capability::StatusSize)) {
-            $attrs[] = StatusAttribute::Size->value;
+            $attrs[] = StatusAttribute::Size;
         }
 
         $response = $this->transceiver->command(
@@ -103,12 +102,12 @@ class Folder implements FolderInterface
         return $this->cachedStatus;
     }
 
-    public function specialUse(): ?SpecialUse
+    public function specialUse(): ?string
     {
         return $this->specialUseAttr;
     }
 
-    public function messages(Flag|SearchCriteriaInterface|null $criteria = null): MessageCollection
+    public function messages(string|SearchCriteriaInterface|null $criteria = null): MessageCollection
     {
         return new MessageCollection(function () use ($criteria): \Generator {
             $this->select();
@@ -122,7 +121,7 @@ class Folder implements FolderInterface
                 return yield from $this->streamFetchMessages('1:*', useUid: false);
             }
 
-            $searchCriteria = $criteria instanceof Flag
+            $searchCriteria = is_string($criteria)
                 ? $this->flagToSearchCriteria($criteria)
                 : $criteria->compile();
 
@@ -339,8 +338,7 @@ class Folder implements FolderInterface
         $args = [$this->encodedPath()];
 
         if ($flags !== []) {
-            $flagStrings = array_map(fn(Flag|string $f) => $f instanceof Flag ? $f->value : $f, $flags);
-            $args[] = '(' . implode(' ', $flagStrings) . ')';
+            $args[] = '(' . implode(' ', $flags) . ')';
         }
 
         if ($internalDate !== null) {
@@ -621,15 +619,16 @@ class Folder implements FolderInterface
         return implode(',', $ranges);
     }
 
-    private function flagToSearchCriteria(Flag $flag): string
+    private function flagToSearchCriteria(string $flag): string
     {
         return match ($flag) {
-            Flag::Seen => 'SEEN',
-            Flag::Answered => 'ANSWERED',
-            Flag::Flagged => 'FLAGGED',
-            Flag::Deleted => 'DELETED',
-            Flag::Draft => 'DRAFT',
-            Flag::Recent => 'RECENT',
+            \D4ry\ImapClient\Enum\Flag::Seen => 'SEEN',
+            \D4ry\ImapClient\Enum\Flag::Answered => 'ANSWERED',
+            \D4ry\ImapClient\Enum\Flag::Flagged => 'FLAGGED',
+            \D4ry\ImapClient\Enum\Flag::Deleted => 'DELETED',
+            \D4ry\ImapClient\Enum\Flag::Draft => 'DRAFT',
+            \D4ry\ImapClient\Enum\Flag::Recent => 'RECENT',
+            default => throw new \InvalidArgumentException("Unknown flag: $flag"),
         };
     }
 

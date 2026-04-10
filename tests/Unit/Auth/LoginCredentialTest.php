@@ -14,23 +14,23 @@ use D4ry\ImapClient\Protocol\TagGenerator;
 use D4ry\ImapClient\Protocol\Transceiver;
 use D4ry\ImapClient\Tests\Unit\Support\FakeConnection;
 use D4ry\ImapClient\ValueObject\Tag;
-use PHPUnit\Framework\Attributes\CoversClass;
-use PHPUnit\Framework\Attributes\UsesClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(LoginCredential::class)]
-#[UsesClass(Transceiver::class)]
-#[UsesClass(Command::class)]
-#[UsesClass(Response::class)]
-#[UsesClass(ResponseParser::class)]
-#[UsesClass(TagGenerator::class)]
-#[UsesClass(Tag::class)]
-#[UsesClass(CommandException::class)]
+/**
+ * @covers \D4ry\ImapClient\Auth\LoginCredential
+ * @uses \D4ry\ImapClient\Protocol\Transceiver
+ * @uses \D4ry\ImapClient\Protocol\Command\Command
+ * @uses \D4ry\ImapClient\Protocol\Response\Response
+ * @uses \D4ry\ImapClient\Protocol\Response\ResponseParser
+ * @uses \D4ry\ImapClient\Protocol\TagGenerator
+ * @uses \D4ry\ImapClient\ValueObject\Tag
+ * @uses \D4ry\ImapClient\Exception\CommandException
+ */
 final class LoginCredentialTest extends TestCase
 {
     public function testMechanism(): void
     {
-        self::assertSame('LOGIN', new LoginCredential('u', 'p')->mechanism());
+        self::assertSame('LOGIN', (new LoginCredential('u', 'p'))->mechanism());
     }
 
     public function testStoresCredentials(): void

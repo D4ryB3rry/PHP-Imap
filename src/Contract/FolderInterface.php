@@ -6,8 +6,6 @@ namespace D4ry\ImapClient\Contract;
 
 use D4ry\ImapClient\Collection\FolderCollection;
 use D4ry\ImapClient\Collection\MessageCollection;
-use D4ry\ImapClient\Enum\Flag;
-use D4ry\ImapClient\Enum\SpecialUse;
 use D4ry\ImapClient\Search\Contract\SearchCriteriaInterface;
 use D4ry\ImapClient\Search\SearchResult;
 use D4ry\ImapClient\ValueObject\MailboxPath;
@@ -22,9 +20,9 @@ interface FolderInterface
 
     public function status(): MailboxStatus;
 
-    public function specialUse(): ?SpecialUse;
+    public function specialUse(): ?string;
 
-    public function messages(Flag|SearchCriteriaInterface|null $criteria = null): MessageCollection;
+    public function messages(string|SearchCriteriaInterface|null $criteria = null): MessageCollection;
 
     public function messagesRange(int $from, int $to, bool $useUid = false, bool $withBodyStructure = false): MessageCollection;
 

@@ -4,13 +4,13 @@ declare(strict_types=1);
 
 namespace D4ry\ImapClient\Protocol\Response;
 
-readonly class Response
+class Response
 {
     /**
      * @param UntaggedResponse[] $untagged
      */
     public function __construct(
-        public ResponseStatus $status,
+        public string $status,
         public string $tag,
         public string $text,
         public array $untagged = [],

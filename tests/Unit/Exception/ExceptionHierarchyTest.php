@@ -14,13 +14,14 @@ use D4ry\ImapClient\Exception\ParseException;
 use D4ry\ImapClient\Exception\ProtocolException;
 use D4ry\ImapClient\Exception\ReadOnlyCollectionException;
 use D4ry\ImapClient\Exception\TimeoutException;
-use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(ImapException::class)]
-#[CoversClass(CommandException::class)]
-#[CoversClass(CapabilityException::class)]
-#[CoversClass(ReadOnlyCollectionException::class)]
+/**
+ * @covers \D4ry\ImapClient\Exception\ImapException
+ * @covers \D4ry\ImapClient\Exception\CommandException
+ * @covers \D4ry\ImapClient\Exception\CapabilityException
+ * @covers \D4ry\ImapClient\Exception\ReadOnlyCollectionException
+ */
 final class ExceptionHierarchyTest extends TestCase
 {
     public function testImapExceptionExtendsRuntime(): void

@@ -10,7 +10,6 @@ use D4ry\ImapClient\Contract\FolderInterface;
 use D4ry\ImapClient\Contract\MessageInterface;
 use D4ry\ImapClient\Enum\Capability;
 use D4ry\ImapClient\Enum\ContentTransferEncoding;
-use D4ry\ImapClient\Enum\Flag;
 use D4ry\ImapClient\Mime\HeaderDecoder;
 use D4ry\ImapClient\Mime\MimeParser;
 use D4ry\ImapClient\Mime\ParsedMessage;
@@ -33,17 +32,17 @@ class Message implements MessageInterface
     private bool $htmlBodyResolved = false;
 
     public function __construct(
-        private readonly Transceiver $transceiver,
-        private readonly Uid $uid,
-        private readonly SequenceNumber $sequenceNumber,
-        private readonly Envelope $envelope,
+        private Transceiver $transceiver,
+        private Uid $uid,
+        private SequenceNumber $sequenceNumber,
+        private Envelope $envelope,
         private FlagSet $flags,
-        private readonly \DateTimeImmutable $internalDate,
-        private readonly int $size,
-        private readonly string $folderPath,
-        private readonly ?string $emailIdValue = null,
-        private readonly ?string $threadIdValue = null,
-        private readonly ?int $modSeqValue = null,
+        private \DateTimeImmutable $internalDate,
+        private int $size,
+        private string $folderPath,
+        private ?string $emailIdValue = null,
+        private ?string $threadIdValue = null,
+        private ?int $modSeqValue = null,
         ?BodyStructure $bodyStructure = null,
     ) {
         $this->bodyStructureCache = $bodyStructure;
@@ -207,16 +206,15 @@ class Message implements MessageInterface
         file_put_contents($path, $this->rawBody());
     }
 
-    public function setFlag(Flag ...$flags): void
+    public function setFlag(string ...$flags): void
     {
         $this->ensureSelected();
 
-        $flagStrings = array_map(fn(Flag $f) => $f->value, $flags);
         $this->transceiver->command(
             'UID STORE',
             (string) $this->uid->value,
             '+FLAGS',
-            '(' . implode(' ', $flagStrings) . ')',
+            '(' . implode(' ', $flags) . ')',
         );
 
         $this->flags = $this->flags->add(...$flags);
@@ -225,16 +223,15 @@ class Message implements MessageInterface
     /**
      * @infection-ignore-all
      */
-    public function clearFlag(Flag ...$flags): void
+    public function clearFlag(string ...$flags): void
     {
         $this->ensureSelected();
 
-        $flagStrings = array_map(fn(Flag $f) => $f->value, $flags);
         $this->transceiver->command(
             'UID STORE',
             (string) $this->uid->value,
             '-FLAGS',
-            '(' . implode(' ', $flagStrings) . ')',
+            '(' . implode(' ', $flags) . ')',
         );
 
         $this->flags = $this->flags->remove(...$flags);
@@ -273,7 +270,7 @@ class Message implements MessageInterface
 
     public function delete(): void
     {
-        $this->setFlag(Flag::Deleted);
+        $this->setFlag(\D4ry\ImapClient\Enum\Flag::Deleted);
     }
 
     public function emailId(): ?string

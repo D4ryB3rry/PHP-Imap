@@ -6,10 +6,11 @@ namespace D4ry\ImapClient\Tests\Unit\ValueObject;
 
 use D4ry\ImapClient\Enum\ContentTransferEncoding;
 use D4ry\ImapClient\ValueObject\BodyStructure;
-use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
-#[CoversClass(BodyStructure::class)]
+/**
+ * @covers \D4ry\ImapClient\ValueObject\BodyStructure
+ */
 final class BodyStructureTest extends TestCase
 {
     public function testMimeTypeIsLowercased(): void
@@ -135,7 +136,7 @@ final class BodyStructureTest extends TestCase
 
     public function testCharsetReturnsNullWhenAbsent(): void
     {
-        self::assertNull(new BodyStructure('TEXT', 'PLAIN')->charset());
+        self::assertNull((new BodyStructure('TEXT', 'PLAIN'))->charset());
     }
 
     public function testDefaultPartNumberAndEmptyParts(): void

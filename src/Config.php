@@ -7,13 +7,13 @@ namespace D4ry\ImapClient;
 use D4ry\ImapClient\Auth\Contract\CredentialInterface;
 use D4ry\ImapClient\Enum\Encryption;
 
-readonly class Config
+class Config
 {
     public function __construct(
         public string $host,
         public CredentialInterface $credential,
         public int $port = 993,
-        public Encryption $encryption = Encryption::Tls,
+        public string $encryption = Encryption::Tls,
         public float $timeout = 30.0,
         public float $greetingTimeout = 10.0,
         public bool $enableCondstore = false,
