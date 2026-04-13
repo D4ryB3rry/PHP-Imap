@@ -187,6 +187,16 @@ class Attachment implements AttachmentInterface
         }
     }
 
+    public function streamTo($sink): void
+    {
+        if (!is_resource($sink) || get_resource_type($sink) !== 'stream') {
+            throw new \InvalidArgumentException('Expected a writable stream resource');
+        }
+
+        $this->ensureSelected();
+        $this->fetchPartIntoStream($sink);
+    }
+
     public function encoding(): ?string
     {
         return $this->structure->encoding;
