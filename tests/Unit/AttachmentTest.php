@@ -584,6 +584,87 @@ final class AttachmentTest extends TestCase
         }
     }
 
+    public function testStreamToWritesDecodedBytesToSink(): void
+    {
+        $decoded = 'streamed-content-here';
+        $encoded = chunk_split(base64_encode($decoded), 76, "\r\n");
+
+        $connection = new FakeConnection();
+        $connection->queueLines('* 1 FETCH (UID 42 BODY[2] {' . strlen($encoded) . '}');
+        $connection->queueBytes($encoded);
+        $connection->queueLines(
+            ')',
+            'A0001 OK FETCH done',
+        );
+
+        $structure = $this->makeStructure(encoding: ContentTransferEncoding::Base64, partNumber: '2');
+        [$attachment] = $this->makeAttachment($connection, $structure);
+
+        $sink = fopen('php://temp', 'w+b');
+        $attachment->streamTo($sink);
+        rewind($sink);
+        $result = stream_get_contents($sink);
+        fclose($sink);
+
+        self::assertSame($decoded, $result);
+        self::assertCount(1, $connection->writes);
+    }
+
+    public function testStreamToUsesCachedContentWhenAvailable(): void
+    {
+        $structure = $this->makeStructure();
+        $connection = new FakeConnection();
+        [$attachment] = $this->makeAttachment($connection, $structure);
+        $this->primeCachedContent($attachment, 'cached-payload');
+
+        $sink = fopen('php://temp', 'w+b');
+        $attachment->streamTo($sink);
+        rewind($sink);
+        $result = stream_get_contents($sink);
+        fclose($sink);
+
+        self::assertSame('cached-payload', $result);
+        self::assertCount(0, $connection->writes, 'streamTo() must not issue commands when cache is warm');
+    }
+
+    public function testStreamToThrowsOnInvalidArgument(): void
+    {
+        $structure = $this->makeStructure();
+        [$attachment] = $this->makeAttachment(new FakeConnection(), $structure);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Expected a writable stream resource');
+
+        $attachment->streamTo('not-a-resource'); // @phpstan-ignore argument.type
+    }
+
+    public function testStreamToTriggersSelectWhenFolderNotSelected(): void
+    {
+        $payload = 'select-test';
+        $connection = new FakeConnection();
+        $connection->queueLines('A0001 OK SELECT done');
+        $connection->queueLines('* 1 FETCH (UID 42 BODY[2] {' . strlen($payload) . '}');
+        $connection->queueBytes($payload);
+        $connection->queueLines(
+            ')',
+            'A0002 OK FETCH done',
+        );
+
+        $structure = $this->makeStructure(encoding: ContentTransferEncoding::SevenBit, partNumber: '2');
+        [$attachment, $transceiver] = $this->makeAttachment($connection, $structure, preselect: false);
+
+        $sink = fopen('php://temp', 'w+b');
+        $attachment->streamTo($sink);
+        rewind($sink);
+        $result = stream_get_contents($sink);
+        fclose($sink);
+
+        self::assertSame($payload, $result);
+        self::assertSame("A0001 SELECT INBOX\r\n", $connection->writes[0]);
+        self::assertSame("A0002 UID FETCH 42 (BODY.PEEK[2])\r\n", $connection->writes[1]);
+        self::assertSame('INBOX', $transceiver->selectedMailbox);
+    }
+
     public function testSaveThrowsWhenDirectoryCannotBeCreated(): void
     {
         $structure = $this->makeStructure(dispositionFilename: 'doomed.txt');

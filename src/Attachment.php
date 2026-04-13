@@ -126,6 +126,22 @@ class Attachment implements AttachmentInterface
         fclose($fp);
     }
 
+    public function streamTo($sink): void
+    {
+        if (!is_resource($sink) || get_resource_type($sink) !== 'stream') {
+            throw new \InvalidArgumentException('Expected a writable stream resource');
+        }
+
+        // If content was already fetched, stream from cache to avoid re-fetch.
+        if ($this->cachedContent !== null) {
+            fwrite($sink, $this->cachedContent);
+            return;
+        }
+
+        $this->ensureSelected();
+        $this->fetchPartIntoStream($sink);
+    }
+
     /**
      * Stream the encoded part body straight from the IMAP socket into $sink,
      * applying the appropriate decoding stream filter so the decoded bytes
