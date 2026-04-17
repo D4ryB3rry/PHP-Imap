@@ -9,6 +9,7 @@ use D4ry\ImapClient\Enum\Capability;
 use D4ry\ImapClient\Exception\CapabilityException;
 use D4ry\ImapClient\Exception\CommandException;
 use D4ry\ImapClient\Protocol\Command\Command;
+use D4ry\ImapClient\Protocol\Command\CommandBuilder;
 use D4ry\ImapClient\Protocol\Contract\TransceiverInterface;
 use D4ry\ImapClient\Protocol\StreamingFetchState;
 use D4ry\ImapClient\Protocol\Response\Response;
@@ -58,22 +59,9 @@ class Transceiver implements TransceiverInterface
      */
     public bool $objectIdStatusDisabled = false;
 
-    public ?string $selectedMailbox = null {
-        get {
-            return $this->selectedMailbox;
-        }
-        set {
-            $this->selectedMailbox = $value;
-        }
-    }
-    public bool $utf8Enabled = false {
-        get {
-            return $this->utf8Enabled;
-        }
-        set {
-            $this->utf8Enabled = $value;
-        }
-    }
+    public ?string $selectedMailbox = null;
+
+    public bool $utf8Enabled = false;
 
     public function __construct(
         private readonly ConnectionInterface $connection,
@@ -85,6 +73,26 @@ class Transceiver implements TransceiverInterface
     public function readGreeting(): UntaggedResponse
     {
         return $this->parser->readGreeting();
+    }
+
+    /**
+     * Issue a SELECT for $mailboxPath unless that mailbox is already the
+     * selected one on this connection. Centralizes the
+     * "selectedMailbox compare → encode → SELECT → cache" sequence that
+     * Message, Attachment, and any future per-mailbox value object need
+     * before issuing UID FETCH / UID STORE / etc.
+     *
+     * @infection-ignore-all
+     */
+    public function ensureSelected(string $mailboxPath): void
+    {
+        if ($this->selectedMailbox === $mailboxPath) {
+            return;
+        }
+
+        $encoded = CommandBuilder::encodeMailboxName($mailboxPath, $this->utf8Enabled);
+        $this->command('SELECT', $encoded);
+        $this->selectedMailbox = $mailboxPath;
     }
 
     public function command(string $name, string ...$args): Response
@@ -362,7 +370,9 @@ class Transceiver implements TransceiverInterface
             return $this->cachedCapabilities;
         }
 
-        $response = $this->command('CAPABILITY');
+        // command() populates $cachedCapabilities as a side effect via
+        // processUntaggedResponses() — the tagged response itself is unused.
+        $this->command('CAPABILITY');
 
         return $this->cachedCapabilities;
     }

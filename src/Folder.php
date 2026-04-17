@@ -429,6 +429,15 @@ class Folder implements FolderInterface
 
     private function performSearch(string $criteria): SearchResult
     {
+        // RFC 3501 §6.4.4 requires SEARCH to declare a CHARSET when criteria
+        // strings contain octets outside US-ASCII; RFC 9051 lifts this only
+        // when UTF8=ACCEPT has been enabled on the connection. Without one of
+        // the two, a server may either reject the command or interpret the
+        // bytes in a charset of its choosing.
+        if (preg_match('/[\x80-\xFF]/', $criteria) === 1 && !$this->transceiver->isUtf8Enabled()) {
+            $criteria = 'CHARSET UTF-8 ' . $criteria;
+        }
+
         $response = $this->transceiver->command('UID SEARCH', $criteria);
 
         $uids = [];

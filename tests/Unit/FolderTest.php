@@ -540,6 +540,68 @@ final class FolderTest extends TestCase
         self::assertSame("A0002 UID SEARCH UNSEEN SUBJECT \"hello\"\r\n", $connection->writes[1]);
     }
 
+    public function testSearchPrependsCharsetUtf8WhenCriteriaContainsNonAsciiAndServerLacksUtf8Accept(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            'A0001 OK SELECT done',
+            '* SEARCH',
+            'A0002 OK SEARCH done',
+        );
+
+        [$folder] = $this->makeFolder($connection);
+
+        $folder->search((new Search())->subject('Grüße'));
+
+        // 'Grüße' UTF-8 bytes contain 0xC3 — performSearch must wrap with
+        // CHARSET UTF-8 so RFC 3501 servers interpret the bytes correctly.
+        self::assertSame(
+            "A0002 UID SEARCH CHARSET UTF-8 SUBJECT \"Grüße\"\r\n",
+            $connection->writes[1],
+        );
+    }
+
+    public function testSearchOmitsCharsetWhenUtf8AcceptEnabled(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            'A0001 OK SELECT done',
+            '* SEARCH',
+            'A0002 OK SEARCH done',
+        );
+
+        [$folder, $transceiver] = $this->makeFolder($connection);
+        $transceiver->utf8Enabled = true;
+
+        $folder->search((new Search())->subject('Grüße'));
+
+        // RFC 9051 with UTF8=ACCEPT: charset declaration is forbidden.
+        self::assertSame(
+            "A0002 UID SEARCH SUBJECT \"Grüße\"\r\n",
+            $connection->writes[1],
+        );
+    }
+
+    public function testSearchOmitsCharsetForAsciiOnlyCriteria(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            'A0001 OK SELECT done',
+            '* SEARCH',
+            'A0002 OK SEARCH done',
+        );
+
+        [$folder] = $this->makeFolder($connection);
+
+        $folder->search((new Search())->subject('plain ascii'));
+
+        // Pure-ASCII path must not pay the CHARSET prefix cost.
+        self::assertSame(
+            "A0002 UID SEARCH SUBJECT \"plain ascii\"\r\n",
+            $connection->writes[1],
+        );
+    }
+
     public function testMessagesWithCriteriaCompressesUidRangesAndStreams(): void
     {
         // Server returns 6 UIDs that compress to "1:3,7,9:10" — verifies both

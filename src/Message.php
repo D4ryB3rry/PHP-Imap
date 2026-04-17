@@ -141,7 +141,7 @@ class Message implements MessageInterface
             return $this->bodyStructureCache;
         }
 
-        $this->ensureSelected();
+        $this->transceiver->ensureSelected($this->folderPath);
 
         $response = $this->transceiver->command(
             'UID FETCH',
@@ -174,7 +174,7 @@ class Message implements MessageInterface
             return $this->rawBodyCache;
         }
 
-        $this->ensureSelected();
+        $this->transceiver->ensureSelected($this->folderPath);
         $response = $this->transceiver->command(
             'UID FETCH',
             (string) $this->uid->value,
@@ -209,7 +209,7 @@ class Message implements MessageInterface
 
     public function setFlag(Flag ...$flags): void
     {
-        $this->ensureSelected();
+        $this->transceiver->ensureSelected($this->folderPath);
 
         $flagStrings = array_map(fn(Flag $f) => $f->value, $flags);
         $this->transceiver->command(
@@ -227,7 +227,7 @@ class Message implements MessageInterface
      */
     public function clearFlag(Flag ...$flags): void
     {
-        $this->ensureSelected();
+        $this->transceiver->ensureSelected($this->folderPath);
 
         $flagStrings = array_map(fn(Flag $f) => $f->value, $flags);
         $this->transceiver->command(
@@ -245,7 +245,7 @@ class Message implements MessageInterface
      */
     public function moveTo(FolderInterface|string $folder): void
     {
-        $this->ensureSelected();
+        $this->transceiver->ensureSelected($this->folderPath);
 
         $targetPath = $folder instanceof FolderInterface ? (string) $folder->path() : $folder;
         $encoded = CommandBuilder::encodeMailboxName($targetPath, $this->transceiver->isUtf8Enabled());
@@ -263,7 +263,7 @@ class Message implements MessageInterface
      */
     public function copyTo(FolderInterface|string $folder): void
     {
-        $this->ensureSelected();
+        $this->transceiver->ensureSelected($this->folderPath);
 
         $targetPath = $folder instanceof FolderInterface ? (string) $folder->path() : $folder;
         $encoded = CommandBuilder::encodeMailboxName($targetPath, $this->transceiver->isUtf8Enabled());
@@ -302,7 +302,7 @@ class Message implements MessageInterface
             return null;
         }
 
-        $this->ensureSelected();
+        $this->transceiver->ensureSelected($this->folderPath);
 
         $section = $part->partNumber;
         $response = $this->transceiver->command(
@@ -418,18 +418,4 @@ class Message implements MessageInterface
         }
     }
 
-    /**
-     * @infection-ignore-all
-     */
-    private function ensureSelected(): void
-    {
-        if ($this->transceiver->selectedMailbox !== $this->folderPath) {
-            $encoded = CommandBuilder::encodeMailboxName(
-                $this->folderPath,
-                $this->transceiver->isUtf8Enabled(),
-            );
-            $this->transceiver->command('SELECT', $encoded);
-            $this->transceiver->selectedMailbox = $this->folderPath;
-        }
-    }
 }

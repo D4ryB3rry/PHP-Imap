@@ -71,6 +71,55 @@ final class SearchTest extends TestCase
         self::assertSame('KEYWORD Important UNKEYWORD Junk', $search->compile());
     }
 
+    public function testKeywordAcceptsDollarPrefixedSystemKeyword(): void
+    {
+        self::assertSame('KEYWORD $Forwarded', new Search()->keyword('$Forwarded')->compile());
+    }
+
+    public function testKeywordRejectsEmptyString(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        new Search()->keyword('');
+    }
+
+    public function testKeywordRejectsWhitespaceInjection(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        new Search()->keyword('foo) BODY "bar"');
+    }
+
+    public function testKeywordRejectsQuoteCharacter(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        new Search()->keyword('foo"bar');
+    }
+
+    public function testKeywordRejectsControlCharacter(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        new Search()->keyword("foo\r\nbar");
+    }
+
+    public function testUnkeywordRejectsParenthesis(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        new Search()->unkeyword('foo(bar');
+    }
+
+    public function testKeywordRejectionMessageFormat(): void
+    {
+        try {
+            new Search()->keyword('foo bar');
+            self::fail('Expected InvalidArgumentException was not thrown.');
+        } catch (\InvalidArgumentException $e) {
+            $message = $e->getMessage();
+            $prefix = 'IMAP keyword must be a non-empty atom (no whitespace, controls, or atom-specials): ';
+            self::assertStringStartsWith($prefix, $message);
+            self::assertStringEndsWith(var_export('foo bar', true), $message);
+            self::assertSame($prefix . var_export('foo bar', true), $message);
+        }
+    }
+
     public function testAllCriterion(): void
     {
         self::assertSame('ALL', new Search()->all()->compile());
@@ -162,6 +211,39 @@ final class SearchTest extends TestCase
         $search = new Search()->subject('Say "hi" \\there');
 
         self::assertSame('SUBJECT "Say \\"hi\\" \\\\there"', $search->compile());
+    }
+
+    public function testQuotedStringRejectsCarriageReturn(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('NUL, CR, or LF');
+        new Search()->subject("first line\rinjected");
+    }
+
+    public function testQuotedStringRejectsLineFeed(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        new Search()->body("payload\na01 NOOP");
+    }
+
+    public function testQuotedStringRejectsNullByte(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        new Search()->from("alice\x00@example.com");
+    }
+
+    public function testHeaderRejectsCrlfInValue(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        new Search()->header('X-Inject', "value\r\nBODY \"smuggled\"");
+    }
+
+    public function testNonAsciiPayloadCompilesToQuotedStringForCallerToEnvelope(): void
+    {
+        // The Search compile() leaves charset selection to the caller — only
+        // CR/LF/NUL are forbidden inside the quoted-string. Folder injects
+        // CHARSET UTF-8 when needed.
+        self::assertSame('SUBJECT "Grüße"', new Search()->subject('Grüße')->compile());
     }
 
     public function testHeaderCriterion(): void

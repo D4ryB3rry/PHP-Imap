@@ -21,6 +21,13 @@ use D4ry\ImapClient\Exception\TimeoutException;
  */
 class SocketConnection implements ConnectionInterface
 {
+    /**
+     * Hard cap on a single CRLF-terminated server line. A buggy or malicious
+     * server that emits a giant line without LF would otherwise OOM the client
+     * via fgets()'s unbounded growth.
+     */
+    private const int MAX_LINE_BYTES = 1_048_576;
+
     /** @var resource|null */
     private $stream = null;
 
@@ -80,7 +87,7 @@ class SocketConnection implements ConnectionInterface
     {
         $this->assertConnected();
 
-        $line = @fgets($this->stream);
+        $line = @fgets($this->stream, self::MAX_LINE_BYTES + 1);
 
         if ($line === false) {
             if ($this->isTimedOut()) {
@@ -88,6 +95,14 @@ class SocketConnection implements ConnectionInterface
             }
 
             throw new ConnectionException('Failed to read from socket');
+        }
+
+        if (!str_ends_with($line, "\n")) {
+            throw new ConnectionException(sprintf(
+                'Server response line missing LF terminator (received %d bytes, cap %d)',
+                strlen($line),
+                self::MAX_LINE_BYTES,
+            ));
         }
 
         return $line;
@@ -153,10 +168,14 @@ class SocketConnection implements ConnectionInterface
     {
         $this->assertConnected();
 
-        $written = @fwrite($this->stream, $data);
+        while ($data !== '') {
+            $written = @fwrite($this->stream, $data);
 
-        if ($written === false || $written !== strlen($data)) {
-            throw new ConnectionException('Failed to write to socket');
+            if ($written === false || $written === 0) {
+                throw new ConnectionException('Failed to write to socket');
+            }
+
+            $data = substr($data, $written);
         }
     }
 

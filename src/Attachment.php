@@ -43,7 +43,7 @@ class Attachment implements AttachmentInterface
             return $this->cachedContent;
         }
 
-        $this->ensureSelected();
+        $this->transceiver->ensureSelected($this->folderPath);
 
         // Route through the same streaming-sink path as save() so the encoded
         // body never materializes as a PHP string mid-fetch — the php://temp
@@ -108,7 +108,7 @@ class Attachment implements AttachmentInterface
             return;
         }
 
-        $this->ensureSelected();
+        $this->transceiver->ensureSelected($this->folderPath);
 
         $fp = fopen($path, 'wb');
         if ($fp === false) {
@@ -138,7 +138,7 @@ class Attachment implements AttachmentInterface
             return;
         }
 
-        $this->ensureSelected();
+        $this->transceiver->ensureSelected($this->folderPath);
         $this->fetchPartIntoStream($sink);
     }
 
@@ -213,15 +213,4 @@ class Attachment implements AttachmentInterface
         return $this->structure;
     }
 
-    private function ensureSelected(): void
-    {
-        if ($this->transceiver->selectedMailbox !== $this->folderPath) {
-            $encoded = Protocol\Command\CommandBuilder::encodeMailboxName(
-                $this->folderPath,
-                $this->transceiver->isUtf8Enabled(),
-            );
-            $this->transceiver->command('SELECT', $encoded);
-            $this->transceiver->selectedMailbox = $this->folderPath;
-        }
-    }
 }

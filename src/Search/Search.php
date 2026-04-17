@@ -213,13 +213,13 @@ class Search implements SearchCriteriaInterface
 
     public function keyword(string $keyword): self
     {
-        $this->criteria[] = 'KEYWORD ' . $keyword;
+        $this->criteria[] = 'KEYWORD ' . $this->assertAtom($keyword);
         return $this;
     }
 
     public function unkeyword(string $keyword): self
     {
-        $this->criteria[] = 'UNKEYWORD ' . $keyword;
+        $this->criteria[] = 'UNKEYWORD ' . $this->assertAtom($keyword);
         return $this;
     }
 
@@ -269,10 +269,40 @@ class Search implements SearchCriteriaInterface
         return $this->compile();
     }
 
+    /**
+     * RFC 9051 quoted-string forbids CR, LF, and NUL — the IMAP grammar has
+     * no escape mechanism for them inside DQUOTEs. Sending them raw would
+     * either be reinterpreted as a new protocol line by the server (command
+     * injection) or rejected outright. Callers that need to embed binary
+     * payloads in a SEARCH must use the literal form, which this builder
+     * does not emit. We surface the limit as a hard error rather than
+     * silently stripping bytes the user explicitly passed.
+     */
     private function quoteString(string $value): string
     {
+        if (preg_match('/[\x00\r\n]/', $value) === 1) {
+            throw new \InvalidArgumentException(
+                'IMAP quoted-string may not contain NUL, CR, or LF (RFC 9051 §4.3); use a literal form for binary content.'
+            );
+        }
+
         $escaped = str_replace(['\\', '"'], ['\\\\', '\\"'], $value);
 
         return '"' . $escaped . '"';
+    }
+
+    /**
+     * RFC 9051 atom: 1*ATOM-CHAR, excluding atom-specials
+     * (controls, SP, "(", ")", "{", "%", "*", '"', "\", "]").
+     */
+    private function assertAtom(string $value): string
+    {
+        if ($value === '' || preg_match('/[\x00-\x20\x7F(){%*"\\\\\]]/', $value) === 1) {
+            throw new \InvalidArgumentException(
+                'IMAP keyword must be a non-empty atom (no whitespace, controls, or atom-specials): ' . var_export($value, true)
+            );
+        }
+
+        return $value;
     }
 }

@@ -30,4 +30,6 @@ interface TransceiverInterface
     }
 
     public function isUtf8Enabled(): bool;
+
+    public function ensureSelected(string $mailboxPath): void;
 }

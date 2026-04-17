@@ -8,6 +8,7 @@ use D4ry\ImapClient\Enum\Capability;
 use D4ry\ImapClient\Exception\CapabilityException;
 use D4ry\ImapClient\Exception\CommandException;
 use D4ry\ImapClient\Protocol\Command\Command;
+use D4ry\ImapClient\Protocol\Command\CommandBuilder;
 use D4ry\ImapClient\Protocol\Response\Response;
 use D4ry\ImapClient\Protocol\Response\FetchResponseParser;
 use D4ry\ImapClient\Protocol\Response\ResponseParser;
@@ -24,6 +25,7 @@ use PHPUnit\Framework\TestCase;
 
 #[CoversClass(Transceiver::class)]
 #[UsesClass(Command::class)]
+#[UsesClass(CommandBuilder::class)]
 #[UsesClass(Response::class)]
 #[UsesClass(FetchResponseParser::class)]
 #[UsesClass(ResponseParser::class)]
@@ -306,6 +308,74 @@ final class TransceiverTest extends TestCase
         $transceiver->selectedMailbox = 'INBOX';
 
         self::assertSame('INBOX', $transceiver->selectedMailbox);
+    }
+
+    public function testEnsureSelectedSendsSelectAndCachesMailbox(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines('A0001 OK SELECT done');
+
+        $transceiver = new Transceiver($connection);
+        $transceiver->ensureSelected('INBOX');
+
+        self::assertSame("A0001 SELECT INBOX\r\n", $connection->writes[0]);
+        self::assertSame('INBOX', $transceiver->selectedMailbox);
+    }
+
+    public function testEnsureSelectedSkipsRoundtripWhenAlreadySelected(): void
+    {
+        $connection = new FakeConnection();
+        $transceiver = new Transceiver($connection);
+        $transceiver->selectedMailbox = 'INBOX';
+
+        $transceiver->ensureSelected('INBOX');
+
+        // No SELECT issued — short-circuit on identical path is the whole
+        // point of caching the selected mailbox on the connection.
+        self::assertSame([], $connection->writes);
+    }
+
+    public function testEnsureSelectedSwitchesMailboxWhenDifferent(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines('A0001 OK SELECT done');
+
+        $transceiver = new Transceiver($connection);
+        $transceiver->selectedMailbox = 'INBOX';
+
+        $transceiver->ensureSelected('Trash');
+
+        self::assertSame("A0001 SELECT Trash\r\n", $connection->writes[0]);
+        self::assertSame('Trash', $transceiver->selectedMailbox);
+    }
+
+    public function testEnsureSelectedEncodesMailboxNameWithModifiedUtf7WhenUtf8Disabled(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines('A0001 OK SELECT done');
+
+        $transceiver = new Transceiver($connection);
+        $transceiver->ensureSelected('Grüße');
+
+        // Without UTF8=ACCEPT enabled, mailbox names go through modified
+        // UTF-7 (RFC 3501 §5.1.3). Verify CommandBuilder integration by
+        // checking that the wire bytes are not the raw UTF-8.
+        self::assertStringStartsWith('A0001 SELECT ', $connection->writes[0]);
+        self::assertStringNotContainsString('Grüße', $connection->writes[0]);
+    }
+
+    public function testEnsureSelectedSendsRawUtf8WhenAcceptEnabled(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines('A0001 OK SELECT done');
+
+        $transceiver = new Transceiver($connection);
+        $transceiver->utf8Enabled = true;
+        $transceiver->ensureSelected('Grüße');
+
+        // With UTF8=ACCEPT, mailbox name passes through quoteString() as raw
+        // UTF-8 — no modified-UTF-7 transcode and no utf8(...) wrapper.
+        self::assertSame("A0001 SELECT \"Grüße\"\r\n", $connection->writes[0]);
     }
 
     public function testIsUtf8EnabledDefaultFalse(): void

@@ -9,6 +9,7 @@ use D4ry\ImapClient\Enum\Encryption;
 use D4ry\ImapClient\Exception\ConnectionException;
 use D4ry\ImapClient\Exception\TimeoutException;
 use D4ry\ImapClient\Tests\Unit\Support\LoopbackServer;
+use D4ry\ImapClient\Tests\Unit\Support\PartialWriteStreamWrapper;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use ReflectionProperty;
@@ -220,6 +221,42 @@ final class SocketConnectionTest extends TestCase
         @fclose($peer);
     }
 
+    public function testReadLineThrowsWhenLineExceedsMaxBytes(): void
+    {
+        // 1 MiB cap. Exercise overflow by feeding 1 MiB + slack of 'A' with no
+        // LF terminator via php://memory; assertConnected() passes because
+        // feof() requires a read attempt past end-of-stream.
+        $stream = fopen('php://memory', 'r+');
+        self::assertNotFalse($stream);
+        fwrite($stream, str_repeat('A', 1_048_576 + 256));
+        rewind($stream);
+
+        $prop = new ReflectionProperty(SocketConnection::class, 'stream');
+        $prop->setValue($this->conn, $stream);
+
+        $this->expectException(ConnectionException::class);
+        $this->expectExceptionMessageMatches('/missing LF terminator \(received 1048576 bytes, cap 1048576\)/');
+        $this->conn->readLine();
+    }
+
+    public function testReadLineThrowsOnShortLineWithoutLfTerminator(): void
+    {
+        // Server sent partial bytes then closed (or otherwise truncated). The
+        // strict LF check rejects it rather than passing a malformed line up
+        // to the parser.
+        $stream = fopen('php://memory', 'r+');
+        self::assertNotFalse($stream);
+        fwrite($stream, '* OK no terminator');
+        rewind($stream);
+
+        $prop = new ReflectionProperty(SocketConnection::class, 'stream');
+        $prop->setValue($this->conn, $stream);
+
+        $this->expectException(ConnectionException::class);
+        $this->expectExceptionMessageMatches('/missing LF terminator \(received 18 bytes/');
+        $this->conn->readLine();
+    }
+
     public function testIsConnectedFalseAfterPeerClose(): void
     {
         $this->server->start('plain');
@@ -321,6 +358,49 @@ final class SocketConnectionTest extends TestCase
         self::assertSame("a01 NOOP\r\n", $received);
 
         @fclose($peer);
+    }
+
+    public function testWriteLoopsAcrossPartialWrites(): void
+    {
+        // Real TCP partial-writes are non-deterministic across platforms.
+        // Use a userland stream wrapper that returns short writes so the
+        // loop body in write() can be exercised with reproducible counts.
+        PartialWriteStreamWrapper::reset([3, 2]); // 1st fwrite=3 bytes, 2nd=2, then full
+        stream_wrapper_register('partial-imap', PartialWriteStreamWrapper::class);
+
+        try {
+            $stream = fopen('partial-imap://x', 'r+');
+            self::assertNotFalse($stream);
+
+            $prop = new ReflectionProperty(SocketConnection::class, 'stream');
+            $prop->setValue($this->conn, $stream);
+
+            $this->conn->write('helloworld');
+
+            self::assertSame('helloworld', PartialWriteStreamWrapper::getWriteLog());
+        } finally {
+            stream_wrapper_unregister('partial-imap');
+        }
+    }
+
+    public function testWriteThrowsWhenFwriteReturnsFalse(): void
+    {
+        PartialWriteStreamWrapper::reset([], failNext: true);
+        stream_wrapper_register('partial-imap', PartialWriteStreamWrapper::class);
+
+        try {
+            $stream = fopen('partial-imap://x', 'r+');
+            self::assertNotFalse($stream);
+
+            $prop = new ReflectionProperty(SocketConnection::class, 'stream');
+            $prop->setValue($this->conn, $stream);
+
+            $this->expectException(ConnectionException::class);
+            $this->expectExceptionMessage('Failed to write to socket');
+            $this->conn->write('hello');
+        } finally {
+            stream_wrapper_unregister('partial-imap');
+        }
     }
 
     public function testWriteThrowsWhenLocalWriteSideShutdown(): void
