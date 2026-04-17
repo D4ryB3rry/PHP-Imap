@@ -8,6 +8,8 @@ use D4ry\ImapClient\Collection\FolderCollection;
 use D4ry\ImapClient\Collection\MessageCollection;
 use D4ry\ImapClient\Enum\Flag;
 use D4ry\ImapClient\Enum\SpecialUse;
+use D4ry\ImapClient\Notify\NotifyEventType;
+use D4ry\ImapClient\Notify\NotifyHandlerInterface;
 use D4ry\ImapClient\Search\Contract\SearchCriteriaInterface;
 use D4ry\ImapClient\Search\SearchResult;
 use D4ry\ImapClient\ValueObject\MailboxPath;
@@ -61,4 +63,19 @@ interface FolderInterface
     public function children(): FolderCollection;
 
     public function append(string $rawMessage, array $flags = [], ?\DateTimeInterface $internalDate = null): ?Uid;
+
+    /**
+     * Subscribe to NOTIFY events for this folder and drain them until the
+     * handler returns false or the timeout expires. Registers
+     * `NOTIFY SET (mailboxes|subtree <this path> (events))` and tears the
+     * subscription down with `NOTIFY NONE` on return.
+     *
+     * @param NotifyEventType[] $events Defaults to MessageNew + MessageExpunge + FlagChange.
+     */
+    public function listen(
+        NotifyHandlerInterface|callable $handler,
+        float $timeout = 300,
+        array $events = [],
+        bool $includeSubtree = false,
+    ): void;
 }

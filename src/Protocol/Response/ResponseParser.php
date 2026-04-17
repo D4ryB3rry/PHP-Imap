@@ -141,6 +141,16 @@ class ResponseParser
         $state->otherUntagged[] = new UntaggedResponse('UNKNOWN', null, $line);
     }
 
+    /**
+     * Public adapter around {@see parseUntaggedLine()} for the NOTIFY
+     * listen-loop, which pumps untagged lines straight off the wire
+     * outside the normal readResponse() flow.
+     */
+    public function parseUntaggedLineForDispatch(string $line): UntaggedResponse
+    {
+        return $this->parseUntaggedLine($line);
+    }
+
     public function readContinuation(): string
     {
         $line = $this->readFullLine();
@@ -418,6 +428,12 @@ class ResponseParser
             preg_match_all('/(\w+)\s+(\d+)/', $attrs, $pairs, PREG_SET_ORDER);
             foreach ($pairs as $pair) {
                 $result['attributes'][strtoupper($pair[1])] = (int) $pair[2];
+            }
+
+            // MAILBOXID (RFC 8474) is the only string-valued STATUS attribute:
+            // MAILBOXID ("server-assigned-unique-id")
+            if (preg_match('/MAILBOXID\s+\("([^"]+)"\)/i', $attrs, $mailboxIdMatch)) {
+                $result['attributes']['MAILBOXID'] = $mailboxIdMatch[1];
             }
         }
 

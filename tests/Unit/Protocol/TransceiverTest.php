@@ -606,4 +606,115 @@ final class TransceiverTest extends TestCase
             self::assertInstanceOf(Capability::class, $cap);
         }
     }
+
+    public function testGetResponseParserReturnsInternalParser(): void
+    {
+        $connection = new FakeConnection();
+        $transceiver = new Transceiver($connection);
+
+        self::assertInstanceOf(ResponseParser::class, $transceiver->getResponseParser());
+    }
+
+    public function testUntaggedHookFiresForEachUntaggedResponse(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            '* 1 EXISTS',
+            '* 2 EXISTS',
+            'A0001 OK NOOP done',
+        );
+
+        $transceiver = new Transceiver($connection);
+
+        /** @var list<UntaggedResponse> $seen */
+        $seen = [];
+        $transceiver->setUntaggedHook(static function (UntaggedResponse $u) use (&$seen): void {
+            $seen[] = $u;
+        });
+
+        $transceiver->command('NOOP');
+
+        self::assertCount(2, $seen);
+        self::assertSame('EXISTS', $seen[0]->type);
+        self::assertSame('EXISTS', $seen[1]->type);
+    }
+
+    public function testUntaggedHookClearedWithNullStopsReceivingEvents(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            '* 1 EXISTS',
+            'A0001 OK done',
+        );
+
+        $transceiver = new Transceiver($connection);
+
+        $calls = 0;
+        $transceiver->setUntaggedHook(static function () use (&$calls): void {
+            $calls++;
+        });
+        $transceiver->setUntaggedHook(null);
+
+        $transceiver->command('NOOP');
+
+        self::assertSame(0, $calls);
+    }
+
+    public function testStreamingFetchFiresUntaggedHookMidStreamForNonFetchUntaggeds(): void
+    {
+        // Interleave a STATUS untagged between FETCH untaggeds — the hook
+        // should fire for STATUS immediately, not when the stream ends.
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            '* 1 FETCH (UID 101 FLAGS (\\Seen))',
+            '* STATUS Archive (MESSAGES 3)',
+            '* 2 FETCH (UID 102 FLAGS (\\Seen))',
+            'A0001 OK UID FETCH done',
+        );
+
+        $transceiver = new Transceiver($connection);
+
+        /** @var list<UntaggedResponse> $hookSeen */
+        $hookSeen = [];
+        $transceiver->setUntaggedHook(static function (UntaggedResponse $u) use (&$hookSeen): void {
+            $hookSeen[] = $u;
+        });
+
+        $yielded = 0;
+        foreach ($transceiver->commandStreamingFetch('UID FETCH', '1:*', '(UID FLAGS)') as $_) {
+            $yielded++;
+        }
+
+        self::assertSame(2, $yielded);
+        self::assertCount(1, $hookSeen);
+        self::assertSame('STATUS', $hookSeen[0]->type);
+    }
+
+    public function testStreamingFetchEarlyBreakStillFiresHookForInterleavedUntaggeds(): void
+    {
+        // Consumer breaks early; the finally-drain loop must still fire the
+        // hook for any non-FETCH untaggeds it encounters while draining.
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            '* 1 FETCH (UID 101 FLAGS ())',
+            '* STATUS Drafts (MESSAGES 7)',
+            '* 2 FETCH (UID 102 FLAGS ())',
+            'A0001 OK UID FETCH done',
+        );
+
+        $transceiver = new Transceiver($connection);
+
+        /** @var list<UntaggedResponse> $hookSeen */
+        $hookSeen = [];
+        $transceiver->setUntaggedHook(static function (UntaggedResponse $u) use (&$hookSeen): void {
+            $hookSeen[] = $u;
+        });
+
+        foreach ($transceiver->commandStreamingFetch('UID FETCH', '1:*', '(UID FLAGS)') as $_) {
+            break; // early exit triggers the finally drain
+        }
+
+        self::assertCount(1, $hookSeen);
+        self::assertSame('STATUS', $hookSeen[0]->type);
+    }
 }

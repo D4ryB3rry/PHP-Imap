@@ -23,6 +23,7 @@ enum Capability: string
     case Thread = 'THREAD';
     case Id = 'ID';
     case Idle = 'IDLE';
+    case Notify = 'NOTIFY';
     case Namespace = 'NAMESPACE';
     case Enable = 'ENABLE';
     case Unselect = 'UNSELECT';

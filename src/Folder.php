@@ -11,6 +11,9 @@ use D4ry\ImapClient\Contract\MessageInterface;
 use D4ry\ImapClient\Enum\Flag;
 use D4ry\ImapClient\Enum\SpecialUse;
 use D4ry\ImapClient\Enum\StatusAttribute;
+use D4ry\ImapClient\Notify\NotifyEventType;
+use D4ry\ImapClient\Notify\NotifyHandlerInterface;
+use D4ry\ImapClient\Notify\NotifyListener;
 use D4ry\ImapClient\Protocol\Command\CommandBuilder;
 use D4ry\ImapClient\Protocol\Transceiver;
 use D4ry\ImapClient\Search\Contract\SearchCriteriaInterface;
@@ -26,13 +29,12 @@ use D4ry\ImapClient\ValueObject\Uid;
 
 class Folder implements FolderInterface
 {
-    private ?MailboxStatus $cachedStatus = null;
-
     public function __construct(
         private readonly Transceiver $transceiver,
         private MailboxPath $mailboxPath,
         private readonly ?SpecialUse $specialUseAttr = null,
         private readonly array $attributes = [],
+        private ?MailboxStatus $cachedStatus = null,
     ) {
     }
 
@@ -70,11 +72,33 @@ class Folder implements FolderInterface
             $attrs[] = StatusAttribute::Size->value;
         }
 
-        $response = $this->transceiver->command(
-            'STATUS',
-            $encoded,
-            '(' . implode(' ', $attrs) . ')',
-        );
+        $wantMailboxId = $this->transceiver->hasCapability(\D4ry\ImapClient\Enum\Capability::ObjectId)
+            && !$this->transceiver->objectIdStatusDisabled;
+
+        $baseAttrs = $attrs;
+
+        if ($wantMailboxId) {
+            $attrs[] = StatusAttribute::MailboxId->value;
+        }
+
+        try {
+            $response = $this->transceiver->command(
+                'STATUS',
+                $encoded,
+                '(' . implode(' ', $attrs) . ')',
+            );
+        } catch (\D4ry\ImapClient\Exception\CommandException $e) {
+            if (!$wantMailboxId || $e->status !== 'BAD' || stripos($e->responseText, 'MAILBOXID') === false) {
+                throw $e;
+            }
+
+            $this->transceiver->objectIdStatusDisabled = true;
+            $response = $this->transceiver->command(
+                'STATUS',
+                $encoded,
+                '(' . implode(' ', $baseAttrs) . ')',
+            );
+        }
 
         $statusData = null;
         foreach ($response->untagged as $untagged) {
@@ -98,6 +122,7 @@ class Folder implements FolderInterface
             unseen: $statusData['UNSEEN'] ?? 0,
             highestModSeq: $statusData['HIGHESTMODSEQ'] ?? null,
             size: $statusData['SIZE'] ?? null,
+            mailboxId: $statusData['MAILBOXID'] ?? null,
         );
 
         return $this->cachedStatus;
@@ -332,6 +357,22 @@ class Folder implements FolderInterface
 
             return $this->parseFolderList($response->untagged);
         });
+    }
+
+    public function listen(
+        NotifyHandlerInterface|callable $handler,
+        float $timeout = 300,
+        array $events = [],
+        bool $includeSubtree = false,
+    ): void {
+        NotifyListener::listenToMailboxes(
+            $this->transceiver,
+            [$this->mailboxPath->path],
+            $handler,
+            $timeout,
+            $events,
+            $includeSubtree,
+        );
     }
 
     public function append(string $rawMessage, array $flags = [], ?\DateTimeInterface $internalDate = null): ?Uid

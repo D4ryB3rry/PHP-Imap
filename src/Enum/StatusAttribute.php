@@ -13,4 +13,5 @@ enum StatusAttribute: string
     case Unseen = 'UNSEEN';
     case HighestModSeq = 'HIGHESTMODSEQ';
     case Size = 'SIZE';
+    case MailboxId = 'MAILBOXID';
 }

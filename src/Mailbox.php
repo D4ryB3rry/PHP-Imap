@@ -23,9 +23,15 @@ use D4ry\ImapClient\Idle\IdleHeartbeatEvent;
 use D4ry\ImapClient\Idle\MessageExpungedEvent;
 use D4ry\ImapClient\Idle\MessageReceivedEvent;
 use D4ry\ImapClient\Idle\RecentCountEvent;
+use D4ry\ImapClient\Notify\EventGroup;
+use D4ry\ImapClient\Notify\NotifyDispatcher;
+use D4ry\ImapClient\Notify\NotifyEventType;
+use D4ry\ImapClient\Notify\NotifyHandlerInterface;
+use D4ry\ImapClient\Notify\NotifyListener;
 use D4ry\ImapClient\Protocol\Command\CommandBuilder;
 use D4ry\ImapClient\Protocol\Transceiver;
 use D4ry\ImapClient\ValueObject\MailboxPath;
+use D4ry\ImapClient\ValueObject\MailboxStatus;
 use D4ry\ImapClient\ValueObject\NamespaceInfo;
 
 readonly class Mailbox implements MailboxInterface
@@ -238,6 +244,104 @@ readonly class Mailbox implements MailboxInterface
 
             return $this->parseFolderList($response->untagged);
         });
+    }
+
+    public function foldersWithStatus(): FolderCollection
+    {
+        return new FolderCollection(function (): array {
+            if ($this->transceiver->hasCapability(Capability::ListStatus)) {
+                return $this->foldersViaListStatus();
+            }
+
+            return $this->foldersViaListThenStatus();
+        });
+    }
+
+    /**
+     * LIST-STATUS path (RFC 5819): single round-trip returns both folder
+     * list and STATUS data for every mailbox.
+     *
+     * @return FolderInterface[]
+     */
+    private function foldersViaListStatus(): array
+    {
+        $statusAttrs = ['MESSAGES', 'UIDNEXT', 'UIDVALIDITY', 'UNSEEN'];
+
+        if ($this->transceiver->hasCapability(Capability::Condstore)) {
+            $statusAttrs[] = 'HIGHESTMODSEQ';
+        }
+
+        if ($this->transceiver->hasCapability(Capability::StatusSize)) {
+            $statusAttrs[] = 'SIZE';
+        }
+
+        $wantMailboxId = $this->transceiver->hasCapability(Capability::ObjectId)
+            && !$this->transceiver->objectIdStatusDisabled;
+
+        $baseAttrs = $statusAttrs;
+
+        if ($wantMailboxId) {
+            $statusAttrs[] = 'MAILBOXID';
+        }
+
+        try {
+            $response = $this->transceiver->command(
+                'LIST',
+                '""',
+                '"*"',
+                'RETURN (STATUS (' . implode(' ', $statusAttrs) . '))',
+            );
+        } catch (\D4ry\ImapClient\Exception\CommandException $e) {
+            if (!$wantMailboxId || $e->status !== 'BAD' || stripos($e->responseText, 'MAILBOXID') === false) {
+                throw $e;
+            }
+
+            $this->transceiver->objectIdStatusDisabled = true;
+            $response = $this->transceiver->command(
+                'LIST',
+                '""',
+                '"*"',
+                'RETURN (STATUS (' . implode(' ', $baseAttrs) . '))',
+            );
+        }
+
+        // Collect STATUS data keyed by mailbox name from interleaved
+        // * STATUS untagged responses that arrive alongside * LIST lines.
+        $statusByName = [];
+        foreach ($response->untagged as $untagged) {
+            // The is_array() guard is defensive: ResponseParser always emits
+            // array data for STATUS untagged responses, so the LogicalAnd
+            // mutant on the conjunction has no observable effect — same
+            // rationale as Folder::status() and parseFolderList().
+            // @infection-ignore-all
+            if ($untagged->type === 'STATUS' && is_array($untagged->data)) {
+                $mailbox = $untagged->data['mailbox'] ?? '';
+                $attrs = $untagged->data['attributes'] ?? [];
+                if ($mailbox !== '') {
+                    $statusByName[$mailbox] = $attrs;
+                }
+            }
+        }
+
+        return $this->parseFolderList($response->untagged, $statusByName);
+    }
+
+    /**
+     * Fallback path for servers without LIST-STATUS: plain LIST followed by
+     * individual STATUS round-trips per folder.
+     *
+     * @return FolderInterface[]
+     */
+    private function foldersViaListThenStatus(): array
+    {
+        $response = $this->transceiver->command('LIST', '""', '"*"');
+        $folders = $this->parseFolderList($response->untagged);
+
+        foreach ($folders as $folder) {
+            $folder->status();
+        }
+
+        return $folders;
     }
 
     public function folder(string $path): FolderInterface
@@ -456,6 +560,114 @@ readonly class Mailbox implements MailboxInterface
         return $handler($event) !== false;
     }
 
+    /**
+     * Subscribe to server-push notifications for mailboxes matching the
+     * supplied {@see EventGroup} list (RFC 5465 `NOTIFY SET`). After this
+     * call the server may interleave untagged responses (EXISTS, EXPUNGE,
+     * FETCH, STATUS, LIST, METADATA ...) into the replies of any subsequent
+     * command, including IDLE.
+     *
+     * Wire-format only in this step — delivery to a PHP handler is wired up
+     * separately via {@see listenForNotifications()} / the passive dispatch
+     * hook registered by the wrapping convenience helpers.
+     *
+     * @param EventGroup[] $groups
+     * @param bool         $includeStatus  If true, request the optional
+     *                                     `STATUS` keyword so the server
+     *                                     pushes `* STATUS` for non-selected
+     *                                     mailboxes matched by the filters.
+     */
+    public function notify(array $groups, bool $includeStatus = false): void
+    {
+        $this->transceiver->requireCapability(Capability::Notify);
+
+        if ($groups === []) {
+            throw new \InvalidArgumentException('notify() requires at least one EventGroup; use notifyNone() to disable notifications');
+        }
+
+        $utf8 = $this->transceiver->isUtf8Enabled();
+
+        $args = ['SET'];
+        if ($includeStatus) {
+            $args[] = 'STATUS';
+        }
+
+        foreach ($groups as $group) {
+            if (!$group instanceof EventGroup) {
+                throw new \InvalidArgumentException('notify() expects EventGroup[] — got ' . get_debug_type($group));
+            }
+            $args[] = $group->toGroupToken($utf8);
+        }
+
+        $this->transceiver->command('NOTIFY', ...$args);
+    }
+
+    /**
+     * Disable all previously-registered NOTIFY subscriptions (RFC 5465
+     * `NOTIFY NONE`). Unlike the default IMAP state, `NONE` also instructs
+     * the server not to send unsolicited events for the selected mailbox.
+     * Also clears any passive-dispatch handler previously registered via
+     * {@see setNotifyHandler()}.
+     */
+    public function notifyNone(): void
+    {
+        $this->transceiver->requireCapability(Capability::Notify);
+
+        $this->transceiver->command('NOTIFY', 'NONE');
+        $this->transceiver->setUntaggedHook(null);
+    }
+
+    public function setNotifyHandler(NotifyHandlerInterface|callable|null $handler): void
+    {
+        if ($handler === null) {
+            $this->transceiver->setUntaggedHook(null);
+            return;
+        }
+
+        $dispatcher = new NotifyDispatcher($handler);
+
+        $this->transceiver->setUntaggedHook(static function ($untagged) use ($dispatcher): void {
+            $dispatcher->dispatch($untagged);
+        });
+    }
+
+    public function listenForNotifications(
+        NotifyHandlerInterface|callable $handler,
+        float $timeout = 300,
+    ): void {
+        NotifyListener::drain($this->transceiver, $handler, $timeout);
+    }
+
+    /**
+     * @param list<FolderInterface|string> $folders
+     * @param NotifyEventType[] $events
+     */
+    public function listenToFolders(
+        array $folders,
+        NotifyHandlerInterface|callable $handler,
+        float $timeout = 300,
+        array $events = [],
+        bool $includeSubtree = false,
+    ): void {
+        if ($folders === []) {
+            throw new \InvalidArgumentException('listenToFolders() requires at least one folder');
+        }
+
+        $mailboxNames = array_map(
+            static fn(FolderInterface|string $f): string => $f instanceof FolderInterface ? $f->path()->path : $f,
+            $folders,
+        );
+
+        NotifyListener::listenToMailboxes(
+            $this->transceiver,
+            $mailboxNames,
+            $handler,
+            $timeout,
+            $events,
+            $includeSubtree,
+        );
+    }
+
     public function disconnect(): void
     {
         try {
@@ -474,9 +686,10 @@ readonly class Mailbox implements MailboxInterface
 
     /**
      * @param \D4ry\ImapClient\Protocol\Response\UntaggedResponse[] $untaggedResponses
+     * @param array<string, array<string, int>> $statusByName  Mailbox name → STATUS attributes (from LIST-STATUS)
      * @return FolderInterface[]
      */
-    private function parseFolderList(array $untaggedResponses): array
+    private function parseFolderList(array $untaggedResponses, array $statusByName = []): array
     {
         $folders = [];
 
@@ -512,11 +725,16 @@ readonly class Mailbox implements MailboxInterface
                 }
             }
 
+            $cachedStatus = isset($statusByName[$name])
+                ? MailboxStatus::fromStatusAttributes($statusByName[$name])
+                : null;
+
             $folders[] = new Folder(
                 transceiver: $this->transceiver,
                 mailboxPath: new MailboxPath($name, $delimiter),
                 specialUseAttr: $specialUse,
                 attributes: $attrs,
+                cachedStatus: $cachedStatus,
             );
         }
 

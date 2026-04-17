@@ -139,6 +139,94 @@ final class FolderTest extends TestCase
         self::assertStringContainsString('SIZE', $connection->writes[0]);
     }
 
+    public function testStatusIncludesMailboxIdWhenObjectIdCapable(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            '* STATUS INBOX (MESSAGES 5 RECENT 0 UIDNEXT 6 UIDVALIDITY 1 UNSEEN 0 MAILBOXID ("F2212ea5-unique-id"))',
+            'A0001 OK STATUS done',
+        );
+
+        [$folder] = $this->makeFolder($connection, 'INBOX', null, [Capability::ObjectId]);
+
+        $status = $folder->status();
+
+        self::assertSame('F2212ea5-unique-id', $status->mailboxId);
+        self::assertStringContainsString('MAILBOXID', $connection->writes[0]);
+    }
+
+    public function testStatusFallsBackWhenServerRejectsMailboxId(): void
+    {
+        $connection = new FakeConnection();
+        // First attempt: server rejects MAILBOXID.
+        $connection->queueLines(
+            'A0001 BAD Error in IMAP command STATUS: Invalid status item MAILBOXID',
+        );
+        // Retry without MAILBOXID: server accepts.
+        $connection->queueLines(
+            '* STATUS INBOX (MESSAGES 5 RECENT 0 UIDNEXT 6 UIDVALIDITY 1 UNSEEN 0)',
+            'A0002 OK STATUS done',
+        );
+
+        [$folder, $transceiver] = $this->makeFolder(
+            $connection,
+            'INBOX',
+            null,
+            [Capability::ObjectId],
+        );
+
+        $status = $folder->status();
+
+        self::assertSame(5, $status->messages);
+        self::assertNull($status->mailboxId);
+
+        // First attempt included MAILBOXID.
+        self::assertStringContainsString('MAILBOXID', $connection->writes[0]);
+        // Retry stripped MAILBOXID and wrapped the remaining item list in
+        // parentheses byte-exactly — pins Concat / ConcatOperandRemoval on
+        // the retry STATUS line.
+        self::assertSame(
+            "A0002 STATUS INBOX (MESSAGES RECENT UIDNEXT UIDVALIDITY UNSEEN)\r\n",
+            $connection->writes[1],
+        );
+
+        // Suppression flag is now set.
+        self::assertTrue($transceiver->objectIdStatusDisabled);
+    }
+
+    public function testStatusRethrowsBadContainingMailboxIdWhenNotObjectIdCapable(): void
+    {
+        // Without ObjectId capability the retry arm MUST NOT engage, even if
+        // the server happens to mention MAILBOXID in its BAD response. Kills
+        // the LogicalOr mutant on the re-throw guard at Folder.php:95.
+        $connection = new FakeConnection();
+        $connection->queueLines('A0001 BAD mysterious MAILBOXID reference in error text');
+
+        [$folder] = $this->makeFolder($connection);
+
+        $this->expectException(\D4ry\ImapClient\Exception\CommandException::class);
+        $folder->status();
+    }
+
+
+    public function testStatusRethrowsUnrelatedBadWhenMailboxIdRequested(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            'A0001 BAD Mailbox is in inconsistent state',
+        );
+
+        [$folder] = $this->makeFolder(
+            $connection,
+            'INBOX',
+            null,
+            [Capability::ObjectId],
+        );
+
+        $this->expectException(\D4ry\ImapClient\Exception\CommandException::class);
+        $folder->status();
+    }
+
     public function testSelectIsCachedWhenAlreadySelected(): void
     {
         $connection = new FakeConnection();

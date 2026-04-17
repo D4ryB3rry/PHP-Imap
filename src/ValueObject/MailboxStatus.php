@@ -14,6 +14,27 @@ readonly class MailboxStatus
         public int $unseen = 0,
         public ?int $highestModSeq = null,
         public ?int $size = null,
+        public ?string $mailboxId = null,
     ) {
+    }
+
+    /**
+     * Build from raw STATUS attribute map (uppercase keys → int values)
+     * as returned by ResponseParser::parseStatusResponse().
+     *
+     * @param array<string, int|string> $attrs
+     */
+    public static function fromStatusAttributes(array $attrs): self
+    {
+        return new self(
+            messages:     $attrs['MESSAGES'] ?? 0,
+            recent:       $attrs['RECENT'] ?? 0,
+            uidNext:      $attrs['UIDNEXT'] ?? 0,
+            uidValidity:  $attrs['UIDVALIDITY'] ?? 0,
+            unseen:       $attrs['UNSEEN'] ?? 0,
+            highestModSeq: $attrs['HIGHESTMODSEQ'] ?? null,
+            size:         $attrs['SIZE'] ?? null,
+            mailboxId:    $attrs['MAILBOXID'] ?? null,
+        );
     }
 }

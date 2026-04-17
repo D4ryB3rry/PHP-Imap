@@ -16,7 +16,7 @@ Designed from scratch for modern PHP: speaks IMAP directly over sockets, fetches
 - 📜 IMAPv4rev2 (RFC 9051) with 18+ extensions
 - 🪶 Lazy loading — bodies and attachments fetched on demand
 - 🎯 BODYSTRUCTURE-first — 50 MB email with a 12 KB text body? You download 12 KB
-- 🔎 Fluent search builder, IDLE push, OAuth2 with token refresh
+- 🔎 Fluent search builder, IDLE + NOTIFY push, OAuth2 with token refresh
 
 ## Installation
 

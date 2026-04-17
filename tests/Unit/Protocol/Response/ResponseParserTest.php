@@ -274,6 +274,25 @@ final class ResponseParserTest extends TestCase
         self::assertSame(100, $status->data['attributes']['UIDNEXT']);
     }
 
+    public function testReadResponseParsesStatusResponseWithMailboxId(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            '* STATUS "INBOX" (MESSAGES 12 UNSEEN 3 UIDNEXT 100 MAILBOXID ("F2212ea5-unique-id"))',
+            'A0001 OK done',
+        );
+
+        $response = $this->makeParser($connection)->readResponse('A0001');
+
+        $status = $response->untagged[0];
+        self::assertSame('STATUS', $status->type);
+        self::assertSame('INBOX', $status->data['mailbox']);
+        self::assertSame(12, $status->data['attributes']['MESSAGES']);
+        self::assertSame(3, $status->data['attributes']['UNSEEN']);
+        self::assertSame(100, $status->data['attributes']['UIDNEXT']);
+        self::assertSame('F2212ea5-unique-id', $status->data['attributes']['MAILBOXID']);
+    }
+
     public function testReadResponseParsesSearchResults(): void
     {
         $connection = new FakeConnection();
@@ -1158,5 +1177,18 @@ final class ResponseParserTest extends TestCase
 
         self::assertSame('FETCH', $fetch->type);
         self::assertSame($payload, $fetch->data['BODY[TEXT]']);
+    }
+
+    public function testParseUntaggedLineForDispatchExposesPrivateParser(): void
+    {
+        // The NOTIFY listen-loop pumps lines off the wire outside the normal
+        // readResponse() flow and classifies them through this public adapter.
+        $parser = $this->makeParser(new FakeConnection());
+
+        $untagged = $parser->parseUntaggedLineForDispatch('* 5 EXISTS');
+
+        self::assertSame('EXISTS', $untagged->type);
+        self::assertIsArray($untagged->data);
+        self::assertSame(5, $untagged->data['number']);
     }
 }

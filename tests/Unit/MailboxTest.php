@@ -33,6 +33,7 @@ use D4ry\ImapClient\Protocol\Transceiver;
 use D4ry\ImapClient\Tests\Unit\Support\FakeConnection;
 use D4ry\ImapClient\Tests\Unit\Support\LoopbackServer;
 use D4ry\ImapClient\Tests\Unit\Support\TimeoutOnceConnection;
+use D4ry\ImapClient\ValueObject\MailboxStatus;
 use D4ry\ImapClient\ValueObject\NamespaceInfo;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\UsesClass;
@@ -46,6 +47,7 @@ use ReflectionProperty;
 #[UsesClass(Folder::class)]
 #[UsesClass(FolderCollection::class)]
 #[UsesClass(NamespaceInfo::class)]
+#[UsesClass(MailboxStatus::class)]
 #[UsesClass(\D4ry\ImapClient\ValueObject\MailboxPath::class)]
 #[UsesClass(\D4ry\ImapClient\ValueObject\Tag::class)]
 #[UsesClass(\D4ry\ImapClient\ValueObject\FlagSet::class)]
@@ -955,6 +957,338 @@ final class MailboxTest extends TestCase
             $server->reap($pid);
             $server->stop();
         }
+    }
+
+    // ── foldersWithStatus() ─────────────────────────────────────────
+
+    public function testFoldersWithStatusUsesListStatusWhenCapabilityPresent(): void
+    {
+        $connection = new FakeConnection();
+        // Interleaved LIST + STATUS responses (RFC 5819)
+        $connection->queueLines(
+            '* LIST (\HasChildren) "/" "INBOX"',
+            '* STATUS INBOX (MESSAGES 12 RECENT 1 UIDNEXT 13 UIDVALIDITY 999 UNSEEN 3)',
+            '* LIST (\Sent) "/" "Sent"',
+            '* STATUS Sent (MESSAGES 5 RECENT 0 UIDNEXT 6 UIDVALIDITY 42 UNSEEN 0)',
+            'A0001 OK LIST done',
+        );
+
+        [$mailbox] = $this->makeMailbox($connection, Capability::ListStatus);
+
+        $folders = $mailbox->foldersWithStatus();
+
+        // Lazy — no writes yet.
+        self::assertSame([], $connection->writes);
+
+        // Trigger evaluation.
+        self::assertSame(2, $folders->count());
+
+        // Exactly one command: LIST with RETURN (STATUS (...))
+        self::assertCount(1, $connection->writes);
+        self::assertSame(
+            "A0001 LIST \"\" \"*\" RETURN (STATUS (MESSAGES UIDNEXT UIDVALIDITY UNSEEN))\r\n",
+            $connection->writes[0],
+        );
+
+        // Verify cached status on each folder.
+        $inbox = $folders->byName('INBOX');
+        self::assertNotNull($inbox);
+        $inboxStatus = $inbox->status();
+        self::assertSame(12, $inboxStatus->messages);
+        self::assertSame(1, $inboxStatus->recent);
+        self::assertSame(13, $inboxStatus->uidNext);
+        self::assertSame(999, $inboxStatus->uidValidity);
+        self::assertSame(3, $inboxStatus->unseen);
+
+        $sent = $folders->byName('Sent');
+        self::assertNotNull($sent);
+        $sentStatus = $sent->status();
+        self::assertSame(5, $sentStatus->messages);
+        self::assertSame(42, $sentStatus->uidValidity);
+    }
+
+    public function testFoldersWithStatusIncludesHighestModSeqWhenCondstoreCapable(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            '* LIST () "/" "INBOX"',
+            '* STATUS INBOX (MESSAGES 1 RECENT 0 UIDNEXT 2 UIDVALIDITY 1 UNSEEN 0 HIGHESTMODSEQ 77)',
+            'A0001 OK LIST done',
+        );
+
+        [$mailbox] = $this->makeMailbox($connection, Capability::ListStatus, Capability::Condstore);
+
+        $folders = $mailbox->foldersWithStatus();
+        self::assertSame(1, $folders->count());
+        self::assertSame(
+            "A0001 LIST \"\" \"*\" RETURN (STATUS (MESSAGES UIDNEXT UIDVALIDITY UNSEEN HIGHESTMODSEQ))\r\n",
+            $connection->writes[0],
+        );
+
+        $status = $folders->byName('INBOX')?->status();
+        self::assertSame(77, $status->highestModSeq);
+    }
+
+    public function testFoldersWithStatusIncludesSizeWhenStatusSizeCapable(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            '* LIST () "/" "INBOX"',
+            '* STATUS INBOX (MESSAGES 1 RECENT 0 UIDNEXT 2 UIDVALIDITY 1 UNSEEN 0 SIZE 8192)',
+            'A0001 OK LIST done',
+        );
+
+        [$mailbox] = $this->makeMailbox($connection, Capability::ListStatus, Capability::StatusSize);
+
+        $folders = $mailbox->foldersWithStatus();
+        self::assertSame(1, $folders->count());
+        self::assertSame(
+            "A0001 LIST \"\" \"*\" RETURN (STATUS (MESSAGES UIDNEXT UIDVALIDITY UNSEEN SIZE))\r\n",
+            $connection->writes[0],
+        );
+
+        $status = $folders->byName('INBOX')?->status();
+        self::assertSame(8192, $status->size);
+    }
+
+    public function testFoldersWithStatusIncludesMailboxIdWhenObjectIdCapable(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            '* LIST () "/" "INBOX"',
+            '* STATUS INBOX (MESSAGES 1 RECENT 0 UIDNEXT 2 UIDVALIDITY 1 UNSEEN 0 MAILBOXID ("F2212ea5-unique-id"))',
+            'A0001 OK LIST done',
+        );
+
+        [$mailbox] = $this->makeMailbox($connection, Capability::ListStatus, Capability::ObjectId);
+
+        $folders = $mailbox->foldersWithStatus();
+        self::assertSame(1, $folders->count());
+        self::assertStringContainsString('MAILBOXID', $connection->writes[0]);
+
+        $status = $folders->byName('INBOX')?->status();
+        self::assertSame('F2212ea5-unique-id', $status->mailboxId);
+    }
+
+    public function testFoldersWithStatusFallsBackWhenServerRejectsMailboxIdInListStatus(): void
+    {
+        $connection = new FakeConnection();
+        // First attempt: server rejects MAILBOXID in LIST-STATUS.
+        $connection->queueLines(
+            'A0001 BAD Error in IMAP command LIST: Invalid status item MAILBOXID',
+        );
+        // Retry without MAILBOXID.
+        $connection->queueLines(
+            '* LIST () "/" "INBOX"',
+            '* STATUS INBOX (MESSAGES 1 RECENT 0 UIDNEXT 2 UIDVALIDITY 1 UNSEEN 0)',
+            'A0002 OK LIST done',
+        );
+
+        [$mailbox, $transceiver] = $this->makeMailbox($connection, Capability::ListStatus, Capability::ObjectId);
+
+        $folders = $mailbox->foldersWithStatus();
+        self::assertSame(1, $folders->count());
+
+        // First attempt included MAILBOXID.
+        self::assertStringContainsString('MAILBOXID', $connection->writes[0]);
+        // Retry stripped MAILBOXID and the remaining item list is wrapped
+        // byte-exactly in parens — pins Concat / ConcatOperandRemoval
+        // mutants on the retry LIST line.
+        self::assertSame(
+            "A0002 LIST \"\" \"*\" RETURN (STATUS (MESSAGES UIDNEXT UIDVALIDITY UNSEEN))\r\n",
+            $connection->writes[1],
+        );
+
+        // Suppression flag is now set.
+        self::assertTrue($transceiver->objectIdStatusDisabled);
+    }
+
+    public function testFoldersWithStatusRethrowsBadContainingMailboxIdWhenNotObjectIdCapable(): void
+    {
+        // Without ObjectId capability the retry arm MUST NOT engage, even if
+        // the server happens to mention MAILBOXID in its BAD response. Kills
+        // the LogicalOr mutant on the re-throw guard at Mailbox.php:295.
+        $connection = new FakeConnection();
+        $connection->queueLines('A0001 BAD random MAILBOXID mention in error text');
+
+        [$mailbox] = $this->makeMailbox($connection, Capability::ListStatus);
+
+        $this->expectException(\D4ry\ImapClient\Exception\CommandException::class);
+        $mailbox->foldersWithStatus()->count();
+    }
+
+    public function testFoldersWithStatusRethrowsUnrelatedBadWhenMailboxIdRequested(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            'A0001 BAD Internal server error',
+        );
+
+        [$mailbox] = $this->makeMailbox($connection, Capability::ListStatus, Capability::ObjectId);
+
+        $this->expectException(\D4ry\ImapClient\Exception\CommandException::class);
+        $mailbox->foldersWithStatus()->count();
+    }
+
+    public function testFoldersWithStatusFallsBackToIndividualStatusWithoutListStatusCapability(): void
+    {
+        $connection = new FakeConnection();
+        // First: plain LIST response
+        $connection->queueLines(
+            '* LIST () "/" "INBOX"',
+            '* LIST (\Sent) "/" "Sent"',
+            'A0001 OK LIST done',
+        );
+        // Then: individual STATUS for INBOX
+        $connection->queueLines(
+            '* STATUS INBOX (MESSAGES 10 RECENT 0 UIDNEXT 11 UIDVALIDITY 500 UNSEEN 2)',
+            'A0002 OK STATUS done',
+        );
+        // Then: individual STATUS for Sent
+        $connection->queueLines(
+            '* STATUS Sent (MESSAGES 3 RECENT 0 UIDNEXT 4 UIDVALIDITY 501 UNSEEN 0)',
+            'A0003 OK STATUS done',
+        );
+
+        // No ListStatus capability → fallback path
+        [$mailbox] = $this->makeMailbox($connection);
+
+        $folders = $mailbox->foldersWithStatus();
+        self::assertSame(2, $folders->count());
+
+        // 3 commands: LIST + 2× STATUS
+        self::assertCount(3, $connection->writes);
+        self::assertStringContainsString('LIST', $connection->writes[0]);
+        self::assertStringNotContainsString('RETURN', $connection->writes[0]);
+        self::assertStringContainsString('STATUS', $connection->writes[1]);
+        self::assertStringContainsString('STATUS', $connection->writes[2]);
+
+        // Status cached from individual round-trips
+        $inbox = $folders->byName('INBOX');
+        self::assertSame(10, $inbox->status()->messages);
+        self::assertSame(500, $inbox->status()->uidValidity);
+
+        $sent = $folders->byName('Sent');
+        self::assertSame(3, $sent->status()->messages);
+        self::assertSame(501, $sent->status()->uidValidity);
+    }
+
+    public function testFoldersWithStatusIsLazy(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            '* LIST () "/" "INBOX"',
+            '* STATUS INBOX (MESSAGES 0 RECENT 0 UIDNEXT 1 UIDVALIDITY 1 UNSEEN 0)',
+            'A0001 OK LIST done',
+        );
+
+        [$mailbox] = $this->makeMailbox($connection, Capability::ListStatus);
+
+        $folders = $mailbox->foldersWithStatus();
+        self::assertSame([], $connection->writes, 'foldersWithStatus() must be lazy');
+
+        // Trigger load
+        $folders->count();
+        self::assertCount(1, $connection->writes);
+    }
+
+    public function testFoldersWithStatusHandlesEmptyMailbox(): void
+    {
+        $connection = new FakeConnection();
+        $connection->queueLines('A0001 OK LIST done');
+
+        [$mailbox] = $this->makeMailbox($connection, Capability::ListStatus);
+
+        $folders = $mailbox->foldersWithStatus();
+        self::assertSame(0, $folders->count());
+    }
+
+    public function testFoldersWithStatusListStatusPathSkipsStatusForFolderWithoutStatusData(): void
+    {
+        // Server returns LIST for folder but no matching STATUS — the folder
+        // should still be created, just without cached status.
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            '* LIST () "/" "INBOX"',
+            '* STATUS INBOX (MESSAGES 5 RECENT 0 UIDNEXT 6 UIDVALIDITY 1 UNSEEN 0)',
+            '* LIST () "/" "Orphan"',
+            // No STATUS for "Orphan"
+            'A0001 OK LIST done',
+        );
+
+        // Queue STATUS response for when Orphan.status() is called explicitly
+        $connection->queueLines(
+            '* STATUS Orphan (MESSAGES 0 RECENT 0 UIDNEXT 1 UIDVALIDITY 99 UNSEEN 0)',
+            'A0002 OK STATUS done',
+        );
+
+        [$mailbox] = $this->makeMailbox($connection, Capability::ListStatus);
+
+        $folders = $mailbox->foldersWithStatus();
+        self::assertSame(2, $folders->count());
+
+        // INBOX has cached status (no extra command).
+        $inbox = $folders->byName('INBOX');
+        self::assertSame(5, $inbox->status()->messages);
+        self::assertCount(1, $connection->writes); // Only the LIST-STATUS command
+
+        // Orphan has no cached status → status() triggers a real STATUS command.
+        $orphan = $folders->byName('Orphan');
+        $orphan->status();
+        self::assertCount(2, $connection->writes); // LIST-STATUS + individual STATUS
+    }
+
+    public function testParseFolderListInjectsStatusWhenProvided(): void
+    {
+        $connection = new FakeConnection();
+        [$mailbox] = $this->makeMailbox($connection);
+
+        $untagged = [
+            new UntaggedResponse('LIST', [
+                'attributes' => [],
+                'delimiter' => '/',
+                'name' => 'INBOX',
+            ]),
+            new UntaggedResponse('LIST', [
+                'attributes' => ['\Sent'],
+                'delimiter' => '/',
+                'name' => 'Sent',
+            ]),
+        ];
+
+        $statusByName = [
+            'INBOX' => ['MESSAGES' => 10, 'UIDVALIDITY' => 42],
+        ];
+
+        $method = new ReflectionMethod(Mailbox::class, 'parseFolderList');
+        $result = $method->invoke($mailbox, $untagged, $statusByName);
+
+        self::assertCount(2, $result);
+
+        // INBOX got injected status
+        $inboxStatus = $result[0]->status();
+        self::assertSame(10, $inboxStatus->messages);
+        self::assertSame(42, $inboxStatus->uidValidity);
+
+        // Sent has no injected status (not in $statusByName)
+        // — accessing status() would trigger a real command, so we don't call it.
+    }
+
+    public function testFoldersWithStatusListStatusSkipsEmptyMailboxInStatusResponse(): void
+    {
+        // Defensive: STATUS response with empty mailbox name should be ignored.
+        $connection = new FakeConnection();
+        $connection->queueLines(
+            '* LIST () "/" "INBOX"',
+            '* STATUS INBOX (MESSAGES 3 RECENT 0 UIDNEXT 4 UIDVALIDITY 1 UNSEEN 0)',
+            'A0001 OK LIST done',
+        );
+
+        [$mailbox] = $this->makeMailbox($connection, Capability::ListStatus);
+
+        $folders = $mailbox->foldersWithStatus();
+        self::assertSame(1, $folders->count());
+        self::assertSame(3, $folders->byName('INBOX')->status()->messages);
     }
 
     public function testConnectFromRecordingReplaysCapturedSession(): void

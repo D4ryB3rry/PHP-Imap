@@ -27,6 +27,16 @@ class Transceiver implements TransceiverInterface
     private int $capabilitiesGeneration = 0;
 
     /**
+     * Optional closure invoked once per untagged response inside
+     * {@see processUntaggedResponses()}. Used by the NOTIFY extension to
+     * route server-pushed events to a NotifyDispatcher while the client
+     * keeps issuing ordinary commands.
+     *
+     * @var (\Closure(\D4ry\ImapClient\Protocol\Response\UntaggedResponse): void)|null
+     */
+    private ?\Closure $untaggedHook = null;
+
+    /**
      * Set while a streaming FETCH is in flight. Any other socket activity
      * (nested commands, direct connection writes) must drain this before
      * issuing its own command, otherwise the streaming generator and the
@@ -40,6 +50,13 @@ class Transceiver implements TransceiverInterface
      * must omit those items for the rest of this connection.
      */
     public bool $objectIdFetchItemsDisabled = false;
+
+    /**
+     * Set when the server advertises OBJECTID but rejects MAILBOXID in
+     * STATUS. Once tripped, STATUS builders must omit MAILBOXID for the
+     * rest of this connection.
+     */
+    public bool $objectIdStatusDisabled = false;
 
     public ?string $selectedMailbox = null {
         get {
@@ -203,12 +220,26 @@ class Transceiver implements TransceiverInterface
                     break;
                 }
 
+                $priorOtherCount = count($state->otherUntagged);
                 $this->parser->readNextStreamingItem($state);
+
+                // Fire the untagged hook for any non-FETCH untaggeds that
+                // just arrived, so NOTIFY-driven events don't sit buffered
+                // until the FETCH stream completes.
+                if ($this->untaggedHook !== null) {
+                    $newCount = count($state->otherUntagged);
+                    for ($i = $priorOtherCount; $i < $newCount; $i++) {
+                        ($this->untaggedHook)($state->otherUntagged[$i]);
+                    }
+                }
             }
 
             $response = $state->finalResponse;
 
-            $this->processUntaggedResponses($response);
+            // Non-FETCH untaggeds have already been routed to the untagged
+            // hook inside the streaming loop above, so suppress the hook
+            // here to avoid double-firing.
+            $this->processUntaggedResponses($response, fireUntaggedHook: false);
 
             if ($response->status === ResponseStatus::No || $response->status === ResponseStatus::Bad) {
                 throw new CommandException(
@@ -227,10 +258,20 @@ class Transceiver implements TransceiverInterface
             if ($this->activeStreaming !== null && !$this->activeStreaming->completed) {
                 try {
                     while (!$this->activeStreaming->completed) {
+                        $priorOtherCount = count($this->activeStreaming->otherUntagged);
                         $this->parser->readNextStreamingItem($this->activeStreaming);
+                        if ($this->untaggedHook !== null) {
+                            $newCount = count($this->activeStreaming->otherUntagged);
+                            for ($i = $priorOtherCount; $i < $newCount; $i++) {
+                                ($this->untaggedHook)($this->activeStreaming->otherUntagged[$i]);
+                            }
+                        }
                     }
                     if ($this->activeStreaming->finalResponse !== null) {
-                        $this->processUntaggedResponses($this->activeStreaming->finalResponse);
+                        $this->processUntaggedResponses(
+                            $this->activeStreaming->finalResponse,
+                            fireUntaggedHook: false,
+                        );
                     }
                 } catch (\Throwable) {
                     // swallowed: connection unrecoverable
@@ -366,12 +407,34 @@ class Transceiver implements TransceiverInterface
         return $this->tagGenerator;
     }
 
+    public function getResponseParser(): ResponseParser
+    {
+        return $this->parser;
+    }
+
+    /**
+     * Install (or clear with null) a hook invoked per untagged response
+     * seen in {@see processUntaggedResponses()}. Side-effect only — hook
+     * return values are ignored; untagged responses are not consumed.
+     *
+     * @param (\Closure(\D4ry\ImapClient\Protocol\Response\UntaggedResponse): void)|null $fn
+     */
+    public function setUntaggedHook(?\Closure $fn): void
+    {
+        $this->untaggedHook = $fn;
+    }
+
+
     /**
      * @infection-ignore-all
      */
-    private function processUntaggedResponses(Response $response): void
+    private function processUntaggedResponses(Response $response, bool $fireUntaggedHook = true): void
     {
         foreach ($response->untagged as $untagged) {
+            if ($fireUntaggedHook && $this->untaggedHook !== null) {
+                ($this->untaggedHook)($untagged);
+            }
+
             if ($untagged->type === 'CAPABILITY' && is_array($untagged->data)) {
                 $this->cachedCapabilities = $this->parseCapabilityStrings($untagged->data);
                 $this->capabilitiesGeneration++;

@@ -12,6 +12,7 @@ Full reference for `d4ry/imap-client`. For a high-level overview and quick start
 - [Attachments](attachments.md) — iterate, filter, save, partial fetch
 - [Search](search.md) — fluent builder, criteria, logical operators
 - [IDLE (Push Notifications)](idle.md) — typed events, handler class, closure form
+- [NOTIFY (Multi-Folder Push)](notify.md) — RFC 5465 subscriptions, passive + active dispatch
 - [Error Handling](error-handling.md) — exception hierarchy, common failures
 
 ## Reference

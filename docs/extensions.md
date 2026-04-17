@@ -18,6 +18,8 @@
 | THREAD | 5256 | Via transceiver |
 | ID | 2971 | `Config::clientId` / `$mailbox->id()` |
 | IDLE | 2177 | `$mailbox->idle()` |
+| NOTIFY | 5465 | `$mailbox->listenToFolders()` / `$folder->listen()` / `$mailbox->notify()` |
+| OBJECTID (MAILBOXID) | 8474 | Auto — STATUS/LIST-STATUS requests MAILBOXID when advertised |
 | NAMESPACE | 2342 | `$mailbox->namespace()` |
 | ENABLE | 5161 | Auto |
 | UNSELECT | 3691 | Auto |
